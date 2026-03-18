@@ -11,19 +11,19 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0a0f;
-    --surface: #13131a;
-    --surface2: #1c1c28;
-    --surface3: #252535;
-    --accent: #7c6af7;
-    --accent2: #f7c96a;
-    --accent3: #6af7c9;
-    --danger: #f76a6a;
-    --warning: #f7a06a;
-    --success: #6af7c9;
-    --text: #f0f0f5;
-    --text2: #8888a8;
-    --border: rgba(255,255,255,0.07);
+    --bg: #080d1a;
+    --surface: #0f1829;
+    --surface2: #162035;
+    --surface3: #1e2d45;
+    --accent: #3b82f6;
+    --accent2: #60a5fa;
+    --accent3: #38bdf8;
+    --danger: #f87171;
+    --warning: #fb923c;
+    --success: #34d399;
+    --text: #e2e8f0;
+    --text2: #64748b;
+    --border: rgba(59,130,246,0.15);
     --radius: 16px;
     --radius-sm: 10px;
   }
@@ -1873,7 +1873,7 @@ function renderTCSummary() {
     if (currentMonth >= txMonth && currentMonth <= lastMonth) {
       totalCuotaMes += tx.cuotaAmt;
       const cuotaNum = currentMonth - txMonth + 1;
-      detalles.push({ desc: tx.desc, cuotaAmt: tx.cuotaAmt, cuotaNum, total: tx.cuotas, saldada: false });
+      detalles.push({ desc: tx.desc, cuotaAmt: tx.cuotaAmt, cuotaNum, total: tx.cuotas, saldada: pagado });
     }
   });
 
@@ -1907,7 +1907,7 @@ function renderTCSummary() {
   + (detalles.length > 0 ? `
      <div class="tc-divider"></div>
      <div class="tc-row">
-       <span class="tc-row-label" style="font-weight:600;color:var(--text);">Total cuotas pendientes</span>
+       <span class="tc-row-label" style="font-weight:600;color:var(--text);">${pagado ? '✅ Total pagado este mes' : 'Total cuotas pendientes'}</span>
        <span class="tc-row-val total">${formatNum(totalCuotaMes)}</span>
      </div>
      ${pendiente > 0 ? `<div class="tc-row" style="margin-top:6px;"><span class="tc-row-label">Saldo pendiente futuro</span><span class="tc-row-val" style="font-size:12px;opacity:.8;">${formatNum(pendiente)}</span></div>` : ''}` : '<div style="font-size:12px;color:var(--accent3);padding:8px 0;">✅ Todas las cuotas de este mes están saldadas</div>');
@@ -2119,19 +2119,19 @@ renderAll();
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0a0f;
-    --surface: #13131a;
-    --surface2: #1c1c28;
-    --surface3: #252535;
-    --accent: #7c6af7;
-    --accent2: #f7c96a;
-    --accent3: #6af7c9;
-    --danger: #f76a6a;
-    --warning: #f7a06a;
-    --success: #6af7c9;
-    --text: #f0f0f5;
-    --text2: #8888a8;
-    --border: rgba(255,255,255,0.07);
+    --bg: #080d1a;
+    --surface: #0f1829;
+    --surface2: #162035;
+    --surface3: #1e2d45;
+    --accent: #3b82f6;
+    --accent2: #60a5fa;
+    --accent3: #38bdf8;
+    --danger: #f87171;
+    --warning: #fb923c;
+    --success: #34d399;
+    --text: #e2e8f0;
+    --text2: #64748b;
+    --border: rgba(59,130,246,0.15);
     --radius: 16px;
     --radius-sm: 10px;
   }
