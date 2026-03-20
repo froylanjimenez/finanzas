@@ -548,6 +548,34 @@
   ::-webkit-scrollbar-track { background:transparent; }
   ::-webkit-scrollbar-thumb { background:var(--border); border-radius:4px; }
 
+  /* ── Presupuesto mensual ── */
+  .budget-bar-wrap { margin:0 20px 14px; }
+  .budget-bar-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:7px; }
+  .budget-bar-label { font-size:10px; color:var(--text2); letter-spacing:1.5px; text-transform:uppercase; }
+  .budget-bar-pct { font-size:12px; font-weight:700; }
+  .budget-bar-track { height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+  .budget-bar-fill { height:100%; border-radius:4px; transition:width .5s ease; }
+  .budget-bar-sub { display:flex; justify-content:space-between; margin-top:5px; }
+  .budget-bar-sub span { font-size:10px; color:var(--text2); }
+
+  /* ── Sparkline (Stats) ── */
+  .sparkline-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; margin-bottom:16px; }
+  .sparkline-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; gap:10px; }
+  .sparkline-kpi { font-family:'Syne',sans-serif; font-size:26px; font-weight:800; line-height:1.1; margin-top:4px; }
+  .sparkline-sub { font-size:11px; color:var(--text2); margin-top:3px; }
+  .sparkline-svg { width:100%; overflow:visible; display:block; }
+  .sparkline-xlabels { display:flex; justify-content:space-between; margin-top:5px; }
+  .sparkline-xlabel { font-size:9px; color:var(--text2); letter-spacing:0.5px; }
+
+  /* ── Comparativa mensual ── */
+  .month-cmp-item { margin-bottom:14px; }
+  .month-cmp-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; }
+  .month-cmp-label { font-size:12px; color:var(--text2); }
+  .month-cmp-val { font-size:13px; font-weight:700; color:var(--danger); }
+  .month-cmp-val.current { color:var(--accent); }
+  .month-cmp-track { height:10px; background:var(--surface2); border-radius:5px; overflow:hidden; position:relative; }
+  .month-cmp-fill { height:100%; border-radius:5px; transition:width .6s ease; }
+
   /* Pago recomendado modal */
   .rec-pago-card {
     background: linear-gradient(135deg, rgba(106,247,201,0.08), rgba(106,247,201,0.02));
@@ -640,6 +668,21 @@
       <div class="stat-card days">
         <div class="stat-val" id="active-days">0</div>
         <div class="stat-label">Días activos</div>
+      </div>
+    </div>
+
+    <!-- Barra presupuesto mensual -->
+    <div class="budget-bar-wrap" id="budget-bar-wrap" style="display:none;">
+      <div class="budget-bar-top">
+        <span class="budget-bar-label">Presupuesto mensual</span>
+        <span class="budget-bar-pct" id="budget-bar-pct">0%</span>
+      </div>
+      <div class="budget-bar-track">
+        <div class="budget-bar-fill" id="budget-bar-fill"></div>
+      </div>
+      <div class="budget-bar-sub">
+        <span id="budget-bar-used"></span>
+        <span id="budget-bar-left"></span>
       </div>
     </div>
 
@@ -783,14 +826,40 @@
   <div id="page-stats" class="page">
     <div class="stats-page">
       <div class="stats-page-title">Estadísticas</div>
-      <div class="chart-card">
-        <div class="chart-title">Gastos — últimos 7 días</div>
-        <div class="bar-chart" id="bar-chart"></div>
+
+      <!-- Sparkline 14 días -->
+      <div class="sparkline-card">
+        <div class="sparkline-header">
+          <div>
+            <div style="font-size:11px;color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;">Gasto — últimos 14 días</div>
+            <div class="sparkline-kpi" id="sparkline-total" style="color:var(--danger);">$0</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="sparkline-sub" id="sparkline-promdia">—</div>
+            <div class="sparkline-sub" id="sparkline-dias">—</div>
+          </div>
+        </div>
+        <svg class="sparkline-svg" id="sparkline-svg" height="80" viewBox="0 0 300 80" preserveAspectRatio="none"></svg>
+        <div class="sparkline-xlabels">
+          <span class="sparkline-xlabel">−13d</span>
+          <span class="sparkline-xlabel">−7d</span>
+          <span class="sparkline-xlabel">Hoy</span>
+        </div>
       </div>
+
+      <!-- Resumen del mes -->
       <div style="margin-bottom:16px;">
         <div class="section-title" style="padding:0 0 12px;">Resumen del mes</div>
         <div class="summary-grid" id="summary-grid"></div>
       </div>
+
+      <!-- Comparativa últimos 3 meses -->
+      <div class="sparkline-card">
+        <div style="font-size:11px;color:var(--text2);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:16px;">Comparativa mensual</div>
+        <div id="month-comparison"></div>
+      </div>
+
+      <!-- Por categoría -->
       <div class="chart-card">
         <div class="chart-title">Por categoría</div>
         <div id="cat-breakdown"></div>
@@ -1541,12 +1610,11 @@ function isPostCorte() {
 }
 
 function calcSaldoTCMesCorte() {
-  // Suma de cuotas TC vigentes en el mes actual, excluyendo las ya saldadas
-  const mesKey = currentMonthKey();
+  // Suma de cuotas TC vigentes en el mes actual (basado en fecha original + cuotas originales)
   const now = new Date();
   const currentMonthLineal = now.getFullYear() * 12 + now.getMonth();
   let total = 0;
-  transactions.filter(t => t.isTc && t.type === 'expense' && t._saldadaMes !== mesKey).forEach(tx => {
+  transactions.filter(t => t.isTc && t.type === 'expense').forEach(tx => {
     const [y, m] = tx.date.split('-').map(Number);
     const txMonth = y * 12 + (m - 1);
     const lastMonth = txMonth + tx.cuotas - 1;
@@ -1679,36 +1747,10 @@ function marcarPagoMinimo() {
   const mesKey = currentMonthKey();
   if (!tcPagos[mesKey]) tcPagos[mesKey] = {};
   tcPagos[mesKey].minPaid = true;
+  tcPagos[mesKey].fecha   = todayStr();
+  tcPagos[mesKey].monto   = calcSaldoTCMesCorte();
   localStorage.setItem('ff_tc_pagos', JSON.stringify(tcPagos));
-
-  // Actualizar transacciones TC vigentes este mes:
-  // - cuotas = 1 → se marcan como saldadas (cuotasRestantes = 0)
-  // - cuotas > 1 → reducir cuotas en 1 y descontar cuotaAmt del amount
-  const now = new Date();
-  const currentMonthLineal = now.getFullYear() * 12 + now.getMonth();
-
-  let changed = false;
-  transactions = transactions.map(tx => {
-    if (!tx.isTc || tx.type !== 'expense') return tx;
-    const [y, m] = tx.date.split('-').map(Number);
-    const txMonth = y * 12 + (m - 1);
-    const lastMonth = txMonth + tx.cuotas - 1;
-    if (currentMonthLineal < txMonth || currentMonthLineal > lastMonth) return tx;
-
-    changed = true;
-    if (tx.cuotas === 1) {
-      // 1 sola cuota → marcar como saldada este mes (cuotasRestantes = 0)
-      return { ...tx, _saldadaMes: mesKey };
-    } else {
-      // Múltiples cuotas → reducir cuotas en 1, descontar cuotaAmt del saldo
-      const nuevasCuotas = tx.cuotas - 1;
-      const nuevoAmount  = tx.amount - tx.cuotaAmt;
-      return { ...tx, cuotas: nuevasCuotas, amount: nuevoAmount };
-    }
-  });
-
-  if (changed) saveData();
-  showToast('✅ Guardado');
+  showToast('✅ Pago mínimo registrado');
   closeModal('pago-modal');
   renderGastosFijos();
   renderHome();
@@ -1937,6 +1979,7 @@ function renderHome() {
   if (homeFilter !== 'todos') filtered = filtered.filter(t => t.cat === homeFilter);
   renderGroupedList('tx-list', filtered, 10);
   renderTCSummary();
+  renderBudgetBar();
 }
 
 // ═══════════════════════════════════════════════
@@ -1945,12 +1988,9 @@ function renderHome() {
 function renderTCSummary() {
   const mesKey = currentMonthKey();
   const pagado = tcPagos[mesKey]?.minPaid || false;
-  // Solo transacciones TC activas (no saldadas este mes)
-  const tcTxs = transactions.filter(t => t.isTc && t.type === 'expense' && t._saldadaMes !== mesKey);
-  const card  = document.getElementById('tc-summary-card');
-  const rows  = document.getElementById('tc-summary-rows');
+  const card   = document.getElementById('tc-summary-card');
+  const rows   = document.getElementById('tc-summary-rows');
 
-  // Si todas están saldadas o no hay ninguna, ocultar card
   const tcTxsAll = transactions.filter(t => t.isTc && t.type === 'expense');
   if (tcTxsAll.length === 0) { card.style.display = 'none'; return; }
   card.style.display = 'block';
@@ -1960,10 +2000,10 @@ function renderTCSummary() {
   let totalCuotaMes = 0;
   const detalles = [];
 
-  tcTxs.forEach(tx => {
+  tcTxsAll.forEach(tx => {
     const [y, m] = tx.date.split('-').map(Number);
-    const txMonth  = y * 12 + (m - 1);
-    const lastMonth= txMonth + tx.cuotas - 1;
+    const txMonth   = y * 12 + (m - 1);
+    const lastMonth = txMonth + tx.cuotas - 1;
     if (currentMonth >= txMonth && currentMonth <= lastMonth) {
       totalCuotaMes += tx.cuotaAmt;
       const cuotaNum = currentMonth - txMonth + 1;
@@ -1971,46 +2011,41 @@ function renderTCSummary() {
     }
   });
 
-  // Mostrar las saldadas este mes (1 cuota) con tachado/✅
-  if (pagado) {
-    transactions.filter(t => t.isTc && t.type === 'expense' && t._saldadaMes === mesKey).forEach(tx => {
-      detalles.push({ desc: tx.desc, cuotaAmt: tx.cuotaAmt, cuotaNum: '-', total: tx.cuotas + 1, saldada: true });
-    });
-  }
-
   let pendiente = 0;
-  tcTxs.forEach(tx => {
+  tcTxsAll.forEach(tx => {
     const [y, m] = tx.date.split('-').map(Number);
-    const txMonth = y * 12 + (m - 1);
+    const txMonth   = y * 12 + (m - 1);
     const lastMonth = txMonth + tx.cuotas - 1;
     if (lastMonth > currentMonth) pendiente += tx.cuotaAmt * (lastMonth - currentMonth);
   });
 
+  const fechaPago = tcPagos[mesKey]?.fecha ? ` · ${tcPagos[mesKey].fecha}` : '';
   document.getElementById('tc-summary-subtitle').textContent = pagado
-    ? '✅ Pago mínimo registrado este mes'
+    ? `✅ Pago registrado${fechaPago}`
     : 'Estimado cuotas — mes actual';
 
-  rows.innerHTML = detalles.map(d => `
-    <div class="tc-row" style="${d.saldada ? 'opacity:0.5;' : ''}">
-      <span class="tc-row-label">
-        ${d.saldada ? '✅ ' : ''}<span style="${d.saldada ? 'text-decoration:line-through;' : ''}">${d.desc}</span>
-        <span style="opacity:.6;font-size:10px;margin-left:4px;">${d.saldada ? 'pagado' : `(${d.cuotaNum}/${d.total})`}</span>
-      </span>
-      <span class="tc-row-val" style="${d.saldada ? 'text-decoration:line-through;color:var(--accent3);' : ''}">${formatNum(d.cuotaAmt)}</span>
-    </div>`).join('')
-  + (detalles.length > 0 ? `
-     <div class="tc-divider"></div>
-     <div class="tc-row">
-       <span class="tc-row-label" style="font-weight:600;color:var(--text);">${pagado ? '✅ Total pagado este mes' : 'Total cuotas pendientes'}</span>
-       <span class="tc-row-val total">${formatNum(totalCuotaMes)}</span>
-     </div>
-     ${pendiente > 0 ? `<div class="tc-row" style="margin-top:6px;"><span class="tc-row-label">Saldo pendiente futuro</span><span class="tc-row-val" style="font-size:12px;opacity:.8;">${formatNum(pendiente)}</span></div>` : ''}` : '<div style="font-size:12px;color:var(--accent3);padding:8px 0;">✅ Todas las cuotas de este mes están saldadas</div>');
+  rows.innerHTML = (detalles.length === 0
+    ? '<div style="font-size:12px;color:var(--accent3);padding:8px 0;">✅ Sin cuotas TC activas este mes</div>'
+    : detalles.map(d => `
+      <div class="tc-row" style="${d.saldada ? 'opacity:0.55;' : ''}">
+        <span class="tc-row-label">
+          ${d.saldada ? '✅ ' : ''}<span style="${d.saldada ? 'text-decoration:line-through;' : ''}">${d.desc}</span>
+          <span style="opacity:.6;font-size:10px;margin-left:4px;">${d.saldada ? 'pagado' : `(${d.cuotaNum}/${d.total})`}</span>
+        </span>
+        <span class="tc-row-val" style="${d.saldada ? 'text-decoration:line-through;color:var(--accent3);' : ''}">${formatNum(d.cuotaAmt)}</span>
+      </div>`).join('')
+    + `<div class="tc-divider"></div>
+       <div class="tc-row">
+         <span class="tc-row-label" style="font-weight:600;color:var(--text);">${pagado ? '✅ Total pagado este mes' : 'Total cuotas pendientes'}</span>
+         <span class="tc-row-val total">${formatNum(totalCuotaMes)}</span>
+       </div>
+       ${pendiente > 0 ? `<div class="tc-row" style="margin-top:6px;"><span class="tc-row-label">Cuotas futuras pendientes</span><span class="tc-row-val" style="font-size:12px;opacity:.8;">${formatNum(pendiente)}</span></div>` : ''}`
+  );
 
   const btnPago = document.getElementById('btn-marcar-pago');
   if (btnPago) {
-    const yaPagado = tcPagos[currentMonthKey()]?.minPaid || false;
-    btnPago.disabled = yaPagado;
-    btnPago.textContent = yaPagado ? '✅ Pago mínimo ya registrado' : '✅ Marcar pago mínimo como realizado';
+    btnPago.disabled = pagado;
+    btnPago.textContent = pagado ? '✅ Pago mínimo ya registrado' : '✅ Marcar pago mínimo como realizado';
   }
 }
 
@@ -2116,48 +2151,98 @@ function showDetail(id) {
 //  STATS
 // ═══════════════════════════════════════════════
 function renderStats() {
-  const chart = document.getElementById('bar-chart');
-  const labels = [], values = [];
   const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    // Construir fecha independiente para cada día — evita mutación del mismo objeto
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+
+  // ── Sparkline 14 días ──
+  const days14 = [], dayDates = [];
+  for (let i = 13; i >= 0; i--) {
+    const d  = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
     const ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    values.push(transactions.filter(t => t.type === 'expense' && t.date === ds).reduce((s,t) => s + t.amount, 0));
-    labels.push(['D','L','M','X','J','V','S'][d.getDay()]);
+    days14.push(transactions.filter(t => t.type === 'expense' && t.date === ds).reduce((s,t) => s+t.amount, 0));
+    dayDates.push(ds);
   }
-  const maxVal = Math.max(...values, 1);
-  chart.innerHTML = values.map((v, i) => {
-    const pct = Math.round((v / maxVal) * 100);
-    return `<div class="bar-col">
-      <div class="bar" style="height:${pct}%" title="${formatNum(v)}"></div>
-      <div class="bar-day">${labels[i]}</div>
-    </div>`;
-  }).join('');
+  const total14      = days14.reduce((s,v) => s+v, 0);
+  const daysConGasto = days14.filter(v => v > 0).length;
+  const prom14       = daysConGasto > 0 ? total14 / daysConGasto : 0;
+  document.getElementById('sparkline-total').textContent  = formatNum(total14);
+  document.getElementById('sparkline-promdia').textContent = `Prom/día activo: ${formatNum(prom14)}`;
+  document.getElementById('sparkline-dias').textContent    = `${daysConGasto} de 14 días con gasto`;
 
-  const monthStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-  const monthTxs = transactions.filter(t => t.date.startsWith(monthStr));
-  const monthExp = monthTxs.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
-  const monthInc = monthTxs.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
-  const totalFijos = gastosFijos.reduce((s,g) => s + g.monto, 0);
+  // SVG sparkline
+  const W = 300, H = 80, padX = 8, padTop = 10, padBot = 6;
+  const max = Math.max(...days14, 1);
+  const pts = days14.map((v, i) => {
+    const x = padX + (i / (days14.length - 1)) * (W - 2 * padX);
+    const y = padTop + ((max - v) / max) * (H - padTop - padBot);
+    return [parseFloat(x.toFixed(1)), parseFloat(y.toFixed(1))];
+  });
+  const polyPts = pts.map(([x, y]) => `${x},${y}`).join(' ');
+  const areaD   = `M ${pts[0][0]},${H} ` + pts.map(([x,y]) => `L ${x},${y}`).join(' ') + ` L ${pts[pts.length-1][0]},${H} Z`;
+  document.getElementById('sparkline-svg').innerHTML = `
+    <defs>
+      <linearGradient id="spg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--danger)" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="var(--danger)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaD}" fill="url(#spg)"/>
+    <polyline fill="none" stroke="var(--danger)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" points="${polyPts}"/>
+    ${pts.map(([x, y], i) => days14[i] > 0
+      ? `<circle cx="${x}" cy="${y}" r="3.5" fill="var(--danger)" stroke="var(--surface)" stroke-width="1.5"><title>${formatNum(days14[i])}</title></circle>`
+      : '').join('')}`;
+
+  // ── Resumen del mes ──
+  const monthStr  = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  const monthTxs  = transactions.filter(t => t.date.startsWith(monthStr));
+  const monthExp  = monthTxs.filter(t => t.type === 'expense').reduce((s,t) => s+t.amount, 0);
+  const monthInc  = monthTxs.filter(t => t.type === 'income').reduce((s,t) => s+t.amount, 0);
+  const totalFijos= gastosFijos.reduce((s,g) => s+g.monto, 0);
   const monthBalance = (salary > 0 ? salary : monthInc) - monthExp - totalFijos;
-  const expDays = [...new Set(monthTxs.filter(t => t.type === 'expense').map(t => t.date))];
-  const monthAvg = expDays.length > 0 ? monthExp / expDays.length : 0;
-
+  const expDays   = [...new Set(monthTxs.filter(t => t.type === 'expense').map(t => t.date))];
+  const monthAvg  = expDays.length > 0 ? monthExp / expDays.length : 0;
   document.getElementById('summary-grid').innerHTML = `
     <div class="summary-item"><div class="summary-item-val" style="color:var(--danger)">${formatNum(monthExp)}</div><div class="summary-item-label">Gastos mes</div></div>
     <div class="summary-item"><div class="summary-item-val" style="color:${monthBalance>=0?'var(--accent3)':'var(--danger)'}">${formatNum(monthBalance)}</div><div class="summary-item-label">Disponible</div></div>
     <div class="summary-item"><div class="summary-item-val" style="color:var(--accent2)">${formatNum(monthAvg)}</div><div class="summary-item-label">Prom/día mes</div></div>
     <div class="summary-item"><div class="summary-item-val" style="color:var(--accent)">${monthTxs.length}</div><div class="summary-item-label">Movimientos</div></div>`;
 
+  // ── Comparativa 3 meses ──
+  const MESES_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  const meses3 = [];
+  for (let i = 2; i >= 0; i--) {
+    const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    const g   = transactions.filter(t => t.type === 'expense' && t.date.startsWith(key)).reduce((s,t) => s+t.amount, 0);
+    meses3.push({ label: `${MESES_SHORT[d.getMonth()]} ${d.getFullYear()}`, gastos: g, isCurrent: i === 0 });
+  }
+  const maxMes = Math.max(...meses3.map(m => m.gastos), 1);
+  const gradients = [
+    'linear-gradient(90deg,var(--accent2),var(--accent))',
+    'linear-gradient(90deg,var(--accent),#5b4fd4)',
+    'linear-gradient(90deg,var(--danger),#f97316)'
+  ];
+  document.getElementById('month-comparison').innerHTML = meses3.map((m, idx) => {
+    const pct = Math.round((m.gastos / maxMes) * 100);
+    return `<div class="month-cmp-item">
+      <div class="month-cmp-header">
+        <span class="month-cmp-label">${m.label}${m.isCurrent ? ' <span style="color:var(--accent);font-size:10px;">← actual</span>' : ''}</span>
+        <span class="month-cmp-val${m.isCurrent ? ' current' : ''}">${formatNum(m.gastos)}</span>
+      </div>
+      <div class="month-cmp-track">
+        <div class="month-cmp-fill" style="width:${pct}%;background:${gradients[idx]};"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // ── Por categoría ──
   const catTotals = {};
   transactions.filter(t => t.type === 'expense').forEach(t => { catTotals[t.cat] = (catTotals[t.cat]||0) + t.amount; });
-  const total = Object.values(catTotals).reduce((s,v) => s+v, 0) || 1;
+  const catTotal = Object.values(catTotals).reduce((s,v) => s+v, 0) || 1;
   const sorted = Object.entries(catTotals).sort((a,b) => b[1]-a[1]);
   document.getElementById('cat-breakdown').innerHTML = sorted.length === 0
     ? '<p style="color:var(--text2);font-size:13px;">Sin datos aún</p>'
     : sorted.map(([cat, val]) => {
-        const pct = Math.round((val/total)*100);
+        const pct   = Math.round((val / catTotal) * 100);
         const color = CAT_COLORS[cat] || '#888';
         return `<div style="margin-bottom:14px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
@@ -2169,6 +2254,31 @@ function renderStats() {
           </div>
         </div>`;
       }).join('');
+}
+
+// ═══════════════════════════════════════════════
+//  PRESUPUESTO
+// ═══════════════════════════════════════════════
+function renderBudgetBar() {
+  const wrap = document.getElementById('budget-bar-wrap');
+  if (!wrap) return;
+  if (!salary || salary <= 0) { wrap.style.display = 'none'; return; }
+  const monthStr   = currentMonthKey();
+  const monthExp   = transactions.filter(t => t.type === 'expense' && t.date.startsWith(monthStr)).reduce((s,t) => s+t.amount, 0);
+  const totalFijos = gastosFijos.reduce((s,g) => s+g.monto, 0);
+  const totalUsado = monthExp + totalFijos;
+  const pct        = Math.min(100, Math.round((totalUsado / salary) * 100));
+  const left       = salary - totalUsado;
+  const color      = pct >= 90 ? 'var(--danger)' : pct >= 70 ? 'var(--warning)' : 'var(--success)';
+  wrap.style.display = 'block';
+  document.getElementById('budget-bar-pct').textContent  = pct + '%';
+  document.getElementById('budget-bar-pct').style.color  = color;
+  document.getElementById('budget-bar-fill').style.width = pct + '%';
+  document.getElementById('budget-bar-fill').style.background = `linear-gradient(90deg, var(--success), ${color})`;
+  document.getElementById('budget-bar-used').textContent = formatNum(totalUsado) + ' usado';
+  const leftEl = document.getElementById('budget-bar-left');
+  leftEl.textContent = left >= 0 ? formatNum(left) + ' disponible' : formatNum(Math.abs(left)) + ' excedido';
+  leftEl.style.color = left >= 0 ? 'var(--text2)' : 'var(--danger)';
 }
 
 // ═══════════════════════════════════════════════
@@ -2220,6 +2330,7 @@ function saveData() {
 function renderAll() {
   renderHome();
   renderSettings();
+  renderBudgetBar();
   // Actualizar si la página activa lo requiere
   if (document.getElementById('page-fijos').classList.contains('active')) renderGastosFijos();
   if (document.getElementById('page-creditos').classList.contains('active')) renderCreditos();
