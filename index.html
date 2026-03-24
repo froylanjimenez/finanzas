@@ -661,6 +661,14 @@
   .inv-status { font-size:11px; color:var(--text2); text-align:center; padding:8px 0; }
   .inv-status.loading { color:var(--accent2); }
   .inv-status.error { color:var(--warning); }
+  .inv-div-badge { font-size:10px; color:var(--accent3); background:rgba(106,247,201,.1); border:1px solid rgba(106,247,201,.2); padding:2px 7px; border-radius:4px; margin-left:4px; }
+  .proy-table { width:100%; border-collapse:collapse; margin-bottom:16px; font-size:12px; }
+  .proy-table th { color:var(--text2); text-transform:uppercase; letter-spacing:.8px; font-size:10px; padding:8px 6px; border-bottom:1px solid var(--border); text-align:right; }
+  .proy-table th:first-child { text-align:left; }
+  .proy-table td { padding:10px 6px; border-bottom:1px solid var(--border); text-align:right; color:var(--text); }
+  .proy-table td:first-child { text-align:left; color:var(--text2); font-weight:600; }
+  .proy-table tr:last-child td { border-bottom:none; color:var(--accent3); font-weight:700; font-family:'Syne',sans-serif; }
+  .proy-note { font-size:10px; color:var(--text2); padding:6px 0 12px; line-height:1.6; }
 
   .toast {
     position: fixed;
@@ -902,8 +910,8 @@
             <input class="form-input" id="sim-tasa" type="number" placeholder="1.5" step="0.01" min="0">
           </div>
           <div class="form-group">
-            <label class="form-label">Cuota mensual actual ($)</label>
-            <input class="form-input" id="sim-cuota" type="text" placeholder="0" oninput="formatAmountInput(this)">
+            <label class="form-label">Plazo restante (meses)</label>
+            <input class="form-input" id="sim-plazo" type="number" placeholder="36" min="1" step="1">
           </div>
           <div class="form-group">
             <label class="form-label">Monto del abono a capital ($)</label>
@@ -1037,6 +1045,35 @@
       </div>
       <div id="inv-list"></div>
       <div class="inv-status" id="inv-status"></div>
+
+      <!-- Proyecciones -->
+      <div class="gf-section-title" style="margin-top:20px;">
+        📊 Proyecciones
+        <button class="gf-add-btn" id="proy-toggle-btn" onclick="toggleProyecciones()">Configurar ▾</button>
+      </div>
+      <div id="inv-proyec-config" style="display:none;">
+        <div class="sim-card" style="margin-bottom:12px;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label">Aporte mensual (USD)</label>
+              <input class="form-input" id="proy-aporte" type="number" placeholder="0" value="0" oninput="renderProyecciones()">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label">Aumento anual aporte (%)</label>
+              <input class="form-input" id="proy-aumento" type="number" placeholder="0" value="0" oninput="renderProyecciones()">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label">Retorno anual capital (%)</label>
+              <input class="form-input" id="proy-retorno" type="number" placeholder="10" value="10" oninput="renderProyecciones()">
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Dividendo anual est. (%)</label>
+              <input class="form-input" id="proy-div" type="number" placeholder="2.5" value="2.5" oninput="renderProyecciones()">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="inv-proyec-table"></div>
     </div>
   </div>
 
@@ -1299,8 +1336,8 @@
       <input class="form-input" id="inv-acciones-input" type="number" placeholder="0" step="0.0001" min="0">
     </div>
     <div class="form-group">
-      <label class="form-label">Precio promedio de compra (USD)</label>
-      <input class="form-input" id="inv-precio-input" type="number" placeholder="0.00" step="0.01" min="0">
+      <label class="form-label">P&amp;L actual (USD) — ganancia positiva, pérdida negativa</label>
+      <input class="form-input" id="inv-pl-input" type="number" placeholder="-50.00 o +120.00" step="0.01">
     </div>
     <button class="btn-primary" onclick="saveInversion()">Guardar acción</button>
     <button class="btn-secondary" onclick="closeModal('add-inversion-modal')">Cancelar</button>
@@ -1317,9 +1354,28 @@ let gastosFijos; try { gastosFijos = JSON.parse(localStorage.getItem('ff_gastos_
 let creditos; try { creditos = JSON.parse(localStorage.getItem('ff_creditos')) || []; } catch(e) { creditos = []; }
 let tcConfig; try { tcConfig = JSON.parse(localStorage.getItem('ff_tc_config')) || null; } catch(e) { tcConfig = null; }
 let tcPagos; try { tcPagos = JSON.parse(localStorage.getItem('ff_tc_pagos')) || {}; } catch(e) { tcPagos = {}; } // {YYYY-MM: {minPaid, recPaid}}
-let inversiones; try { inversiones = JSON.parse(localStorage.getItem('ff_inversiones')) || []; } catch(e) { inversiones = []; }
-let invPrecios = {}; // {ticker: {price, change, changePct, currency}}
+const INV_DEFAULTS = [
+  { id:1, ticker:'CIB',    nombre:'Bancolombia ADR',    units:37.86492,  pl:768.00  },
+  { id:2, ticker:'SPY5.L', nombre:'S&P 500 ETF (LSE)',  units:1.195253,  pl:41.29   },
+  { id:3, ticker:'MCHI',   nombre:'iShares MSCI China', units:14.00114,  pl:-25.16  },
+  { id:4, ticker:'CRYPTO', nombre:'CryptoPortfolio',    units:1,         pl:-381.25 },
+  { id:5, ticker:'VZ',     nombre:'Verizon',            units:5.68711,   pl:58.52   },
+  { id:6, ticker:'NU',     nombre:'Nu Holdings',        units:12.9858,   pl:-8.62   },
+  { id:7, ticker:'OWL',    nombre:'Blue Owl Capital',   units:10.00557,  pl:-90.05  }
+];
+// div yield % annual, expected capital appreciation % annual
+const INV_META = {
+  'CIB':    { div:4.5,  cap:6.0  }, 'SPY5.L': { div:1.3,  cap:10.0 },
+  'MCHI':   { div:1.5,  cap:6.0  }, 'CRYPTO': { div:0.0,  cap:20.0 },
+  'VZ':     { div:6.5,  cap:1.5  }, 'NU':     { div:0.0,  cap:25.0 },
+  'OWL':    { div:4.2,  cap:10.0 }
+};
+let stored = localStorage.getItem('ff_inversiones');
+let inversiones = stored ? (JSON.parse(stored) || []) : JSON.parse(JSON.stringify(INV_DEFAULTS));
+if (!stored) localStorage.setItem('ff_inversiones', JSON.stringify(inversiones));
+let invPrecios = {}; // {ticker: {price, changePct, name}}
 let usdCop = null;
+let proyecVisible = false;
 
 let currentType   = 'expense';
 let selectedCat   = 'comida';
@@ -2510,43 +2566,46 @@ function setSimMode(mode) {
 function calcularAbono() {
   const P = getRawAmount(document.getElementById('sim-saldo').value);
   const r = parseFloat(document.getElementById('sim-tasa').value) / 100;
-  const C = getRawAmount(document.getElementById('sim-cuota').value);
+  const n = parseInt(document.getElementById('sim-plazo').value) || 0;
   const A = getRawAmount(document.getElementById('sim-abono').value);
 
-  if (!P || !r || !C || !A) { showToast('Completa todos los campos'); return; }
-  if (C <= P * r) { showToast('La cuota debe ser mayor al interés mensual'); return; }
+  if (!P || !r || !n || !A) { showToast('Completa todos los campos'); return; }
+  if (r * P >= P) { showToast('Tasa inválida'); return; }
   if (A >= P) { showToast('El abono no puede superar el saldo'); return; }
 
-  // Plazo actual (meses): n = -ln(1 - P*r/C) / ln(1+r)
-  const nActual = Math.ceil(-Math.log(1 - P * r / C) / Math.log(1 + r));
-  const interesActual = C * nActual - P;
+  // Cuota actual a partir de P, r, n
+  const t0 = Math.pow(1 + r, n);
+  const C = P * r * t0 / (t0 - 1);
+  const interesActual = C * n - P;
 
-  const P2 = P - A; // saldo tras el abono
+  const P2 = P - A;
   const res = document.getElementById('sim-result');
 
-  let html = `<div class="sim-result-row"><span class="sim-result-key">Saldo antes del abono</span><span class="sim-result-val">${formatNum(P)}</span></div>
+  let html = `
+    <div class="sim-result-row"><span class="sim-result-key">Saldo antes del abono</span><span class="sim-result-val">${formatNum(P)}</span></div>
     <div class="sim-result-row"><span class="sim-result-key">Saldo después del abono</span><span class="sim-result-val">${formatNum(P2)}</span></div>
-    <div class="sim-result-row"><span class="sim-result-key">Plazo actual</span><span class="sim-result-val">${nActual} meses</span></div>`;
+    <div class="sim-result-row"><span class="sim-result-key">Cuota mensual actual</span><span class="sim-result-val">${formatNum(C)}</span></div>
+    <div class="sim-result-row"><span class="sim-result-key">Plazo actual</span><span class="sim-result-val">${n} meses</span></div>`;
 
   if (simMode === 'tiempo') {
-    // Mismo cuota, calcular nuevo plazo
     const nNuevo = Math.ceil(-Math.log(1 - P2 * r / C) / Math.log(1 + r));
-    const mesesAhorrados = nActual - nNuevo;
+    const mesesAhorrados = n - nNuevo;
     const interesNuevo = C * nNuevo - P2;
     const interesAhorrado = interesActual - interesNuevo;
-    html += `<div class="sim-result-row"><span class="sim-result-key">Nuevo plazo</span><span class="sim-result-val highlight">${nNuevo} meses</span></div>
+    html += `
+      <div class="sim-result-row"><span class="sim-result-key">Nuevo plazo</span><span class="sim-result-val highlight">${nNuevo} meses</span></div>
       <div class="sim-result-row"><span class="sim-result-key">Meses ahorrados</span><span class="sim-result-val">⏱ ${mesesAhorrados} meses menos</span></div>
-      <div class="sim-saving">💰 Ahorro en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Interés total sin abono: ${formatNum(interesActual)} → con abono: ${formatNum(interesNuevo)}</div>`;
+      <div class="sim-saving">💰 Ahorro en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Sin abono: ${formatNum(interesActual)} en intereses → Con abono: ${formatNum(interesNuevo)}</div>`;
   } else {
-    // Mismo plazo, calcular nueva cuota
-    const t = Math.pow(1 + r, nActual);
-    const cNueva = P2 * r * t / (t - 1);
+    const t2 = Math.pow(1 + r, n);
+    const cNueva = P2 * r * t2 / (t2 - 1);
     const ahorroMensual = C - cNueva;
-    const interesNuevo = cNueva * nActual - P2;
+    const interesNuevo = cNueva * n - P2;
     const interesAhorrado = interesActual - interesNuevo;
-    html += `<div class="sim-result-row"><span class="sim-result-key">Nueva cuota mensual</span><span class="sim-result-val highlight">${formatNum(cNueva)}</span></div>
+    html += `
+      <div class="sim-result-row"><span class="sim-result-key">Nueva cuota mensual</span><span class="sim-result-val highlight">${formatNum(cNueva)}</span></div>
       <div class="sim-result-row"><span class="sim-result-key">Reducción mensual</span><span class="sim-result-val">💸 ${formatNum(ahorroMensual)} menos/mes</span></div>
-      <div class="sim-saving">💰 Ahorro total en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Interés total sin abono: ${formatNum(interesActual)} → con abono: ${formatNum(interesNuevo)}</div>`;
+      <div class="sim-saving">💰 Ahorro total en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Sin abono: ${formatNum(interesActual)} → Con abono: ${formatNum(interesNuevo)}</div>`;
   }
 
   res.innerHTML = html;
@@ -2557,7 +2616,7 @@ function calcularAbono() {
 //  INVERSIONES (PORTAFOLIO)
 // ═══════════════════════════════════════════════
 function showAddInversionModal() {
-  ['inv-ticker-input','inv-nombre-input','inv-acciones-input','inv-precio-input'].forEach(id => {
+  ['inv-ticker-input','inv-nombre-input','inv-acciones-input','inv-pl-input'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('add-inversion-modal').classList.add('open');
@@ -2566,21 +2625,21 @@ function showAddInversionModal() {
 function saveInversion() {
   const ticker = document.getElementById('inv-ticker-input').value.trim().toUpperCase();
   const nombre = document.getElementById('inv-nombre-input').value.trim();
-  const acciones = parseFloat(document.getElementById('inv-acciones-input').value) || 0;
-  const precioPromedio = parseFloat(document.getElementById('inv-precio-input').value) || 0;
-  if (!ticker || acciones <= 0 || precioPromedio <= 0) { showToast('Completa ticker, acciones y precio'); return; }
-  inversiones.push({ id: Date.now(), ticker, nombre: nombre || ticker, acciones, precioPromedio });
+  const units = parseFloat(document.getElementById('inv-acciones-input').value) || 0;
+  const pl = parseFloat(document.getElementById('inv-pl-input').value) || 0;
+  if (!ticker || units <= 0) { showToast('Completa ticker y cantidad de acciones'); return; }
+  inversiones.push({ id: Date.now(), ticker, nombre: nombre || ticker, units, pl });
   localStorage.setItem('ff_inversiones', JSON.stringify(inversiones));
   closeModal('add-inversion-modal');
-  renderInversiones();
   actualizarPrecios();
 }
 
 function deleteInversion(id) {
+  const inv = inversiones.find(i => i.id === id);
+  if (inv) delete invPrecios[inv.ticker];
   inversiones = inversiones.filter(i => i.id !== id);
-  delete invPrecios[inversiones.find ? '' : ''];
   localStorage.setItem('ff_inversiones', JSON.stringify(inversiones));
-  renderInversiones();
+  renderInversiones(usdCop);
 }
 
 async function fetchUsdCop() {
@@ -2593,6 +2652,38 @@ async function fetchUsdCop() {
   } catch { return null; }
 }
 
+async function fetchTickerPrice(ticker) {
+  if (ticker === 'CRYPTO') return null; // eToro smart portfolio, no public ticker
+  // Try direct Yahoo Finance chart API first, then CORS proxy fallback
+  const endpoints = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`,
+    `https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=1d&range=1d')}`
+  ];
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      let data;
+      if (url.includes('allorigins')) {
+        const wrapper = await resp.json();
+        data = JSON.parse(wrapper.contents);
+      } else {
+        data = await resp.json();
+      }
+      const meta = data?.chart?.result?.[0]?.meta;
+      if (meta && meta.regularMarketPrice) {
+        return {
+          price: meta.regularMarketPrice,
+          prevClose: meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice,
+          name: meta.longName || meta.shortName || ticker,
+          currency: meta.currency || 'USD'
+        };
+      }
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
 async function actualizarPrecios() {
   if (!inversiones.length) return;
   const btn = document.getElementById('inv-refresh-btn');
@@ -2600,29 +2691,25 @@ async function actualizarPrecios() {
   if (btn) { btn.disabled = true; btn.textContent = '↻ Actualizando...'; }
   if (status) { status.textContent = 'Obteniendo precios...'; status.className = 'inv-status loading'; }
 
-  const tickers = [...new Set(inversiones.map(i => i.ticker))].join(',');
-  const rate = await fetchUsdCop();
+  const [rate] = await Promise.all([fetchUsdCop()]);
+  const uniqueTickers = [...new Set(inversiones.map(i => i.ticker))];
+  const results = await Promise.all(uniqueTickers.map(t => fetchTickerPrice(t)));
+  uniqueTickers.forEach((t, i) => { if (results[i]) invPrecios[t] = results[i]; });
 
-  try {
-    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickers)}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketChange,shortName,currency`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    const quotes = data?.quoteResponse?.result || [];
-    quotes.forEach(q => {
-      invPrecios[q.symbol] = {
-        price: q.regularMarketPrice,
-        change: q.regularMarketChange,
-        changePct: q.regularMarketChangePercent,
-        currency: q.currency || 'USD',
-        name: q.shortName || q.symbol
-      };
-    });
-    if (status) { status.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-CO')}`; status.className = 'inv-status'; }
-  } catch {
-    if (status) { status.textContent = 'No se pudo conectar. Verifica tu conexión.'; status.className = 'inv-status error'; }
+  const fetched = results.filter(Boolean).length;
+  const total = uniqueTickers.filter(t => t !== 'CRYPTO').length;
+  if (status) {
+    if (fetched === 0 && total > 0) {
+      status.textContent = 'No se pudo conectar. Verifica tu conexión.';
+      status.className = 'inv-status error';
+    } else {
+      status.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-CO')} (${fetched}/${total} activos)`;
+      status.className = 'inv-status';
+    }
   }
 
   renderInversiones(rate);
+  renderProyecciones();
   if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
 }
 
@@ -2638,28 +2725,35 @@ function renderInversiones(rate) {
 
   document.getElementById('inv-portfolio-card').style.display = 'block';
   const cop = rate || usdCop;
-  let totalUSD = 0, totalInvertido = 0;
+  let totalUSD = 0, totalPL = 0;
 
   list.innerHTML = inversiones.map(inv => {
     const p = invPrecios[inv.ticker];
     const precio = p ? p.price : null;
-    const valorActual = precio !== null ? inv.acciones * precio : null;
-    const valorInvertido = inv.acciones * inv.precioPromedio;
-    const ganancia = valorActual !== null ? valorActual - valorInvertido : null;
-    const gPct = ganancia !== null ? (ganancia / valorInvertido) * 100 : null;
+    const valorActual = precio !== null ? inv.units * precio : null;
+    // P&L known from user data; cost basis derived as currentValue - pl
+    const plKnown = inv.pl || 0;
+    const costBasis = valorActual !== null ? valorActual - plKnown : null;
+    const gPct = costBasis && costBasis > 0 ? (plKnown / costBasis) * 100 : null;
     if (valorActual !== null) totalUSD += valorActual;
-    totalInvertido += valorInvertido;
+    totalPL += plKnown;
 
+    const meta = INV_META[inv.ticker] || { div: 0, cap: 0 };
+    const divBadge = meta.div > 0 ? `<span class="inv-div-badge">div ${meta.div}%</span>` : '';
     const precioStr = precio !== null ? `$${precio.toFixed(2)}` : '—';
-    const changePct = p ? `${p.changePct >= 0 ? '+' : ''}${p.changePct.toFixed(2)}%` : '';
-    const changeColor = p ? (p.changePct >= 0 ? 'var(--accent3)' : 'var(--danger)') : 'var(--text2)';
+    let changePct = '', changeColor = 'var(--text2)';
+    if (p && p.prevClose && p.prevClose !== p.price) {
+      const chg = ((p.price - p.prevClose) / p.prevClose) * 100;
+      changePct = `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`;
+      changeColor = chg >= 0 ? 'var(--accent3)' : 'var(--danger)';
+    }
     const valorStr = valorActual !== null ? `$${valorActual.toFixed(2)}` : '—';
-    const glStr = ganancia !== null ? `${ganancia >= 0 ? '+' : ''}$${ganancia.toFixed(2)} (${gPct.toFixed(2)}%)` : '—';
-    const glClass = ganancia !== null ? (ganancia >= 0 ? 'pos' : 'neg') : '';
+    const glStr = `${plKnown >= 0 ? '+' : ''}$${plKnown.toFixed(2)}${gPct !== null ? ' (' + gPct.toFixed(1) + '%)' : ''}`;
+    const glClass = plKnown >= 0 ? 'pos' : 'neg';
 
     return `<div class="inv-item">
       <div class="inv-item-top">
-        <div><div class="inv-ticker">${inv.ticker}</div><div class="inv-name">${p?.name || inv.nombre}</div></div>
+        <div><div class="inv-ticker">${inv.ticker}${divBadge}</div><div class="inv-name">${p?.name || inv.nombre}</div></div>
         <div class="inv-price">
           <div class="inv-price-val">${precioStr}</div>
           <div class="inv-price-change" style="color:${changeColor}">${changePct}</div>
@@ -2667,9 +2761,9 @@ function renderInversiones(rate) {
       </div>
       <div class="inv-item-bot">
         <div>
-          <div class="inv-shares-info">${inv.acciones} acc × $${inv.precioPromedio.toFixed(2)}</div>
+          <div class="inv-shares-info">${inv.units} acc${costBasis !== null ? ` · cost ~$${(costBasis / inv.units).toFixed(2)}` : ''}</div>
           <div class="inv-value">${valorStr} USD</div>
-          <div class="inv-gl ${glClass}">${glStr}</div>
+          <div class="inv-gl ${glClass}">P&L ${glStr}</div>
         </div>
         <button class="inv-del" onclick="deleteInversion(${inv.id})">🗑</button>
       </div>
@@ -2677,12 +2771,112 @@ function renderInversiones(rate) {
   }).join('');
 
   // Totales
-  const glTotal = totalUSD - totalInvertido;
-  const glPct = totalInvertido > 0 ? (glTotal / totalInvertido) * 100 : 0;
+  const glColor = totalPL >= 0 ? 'var(--accent3)' : 'var(--danger)';
   document.getElementById('inv-total-usd').textContent = `$${totalUSD.toFixed(2)} USD`;
   document.getElementById('inv-total-cop').textContent = cop ? `≈ ${formatNum(totalUSD * cop).replace('$','')} COP (1 USD = ${Math.round(cop).toLocaleString('es-CO')} COP)` : '— COP (sin tasa de cambio)';
-  const glColor = glTotal >= 0 ? 'var(--accent3)' : 'var(--danger)';
-  document.getElementById('inv-total-gl').innerHTML = `<span style="color:${glColor};font-size:13px;">${glTotal >= 0 ? '▲' : '▼'} ${glTotal >= 0 ? '+' : ''}$${glTotal.toFixed(2)} USD (${glPct.toFixed(2)}%)</span> <span style="font-size:11px;color:var(--text2);">vs precio promedio</span>`;
+  document.getElementById('inv-total-gl').innerHTML = `<span style="color:${glColor};font-size:13px;">${totalPL >= 0 ? '▲' : '▼'} P&L total: ${totalPL >= 0 ? '+' : ''}$${totalPL.toFixed(2)} USD</span>`;
+}
+
+function toggleProyecciones() {
+  proyecVisible = !proyecVisible;
+  const cfg = document.getElementById('inv-proyec-config');
+  const btn = document.getElementById('proy-toggle-btn');
+  if (cfg) cfg.style.display = proyecVisible ? 'block' : 'none';
+  if (btn) btn.textContent = proyecVisible ? 'Ocultar ▴' : 'Configurar ▾';
+  if (proyecVisible) renderProyecciones();
+}
+
+function renderProyecciones() {
+  const el = document.getElementById('inv-proyec-table');
+  if (!el) return;
+
+  // Current portfolio value (use stored P&L if no prices fetched yet)
+  let valorBase = 0;
+  inversiones.forEach(inv => {
+    const p = invPrecios[inv.ticker];
+    if (p) valorBase += inv.units * p.price;
+    else valorBase += (inv.pl || 0) + 0; // fallback: only P&L known, treat value as unknown
+  });
+  // Weighted avg div & cap from INV_META
+  let totalW = 0, wDiv = 0, wCap = 0;
+  inversiones.forEach(inv => {
+    const p = invPrecios[inv.ticker];
+    const val = p ? inv.units * p.price : 0;
+    const meta = INV_META[inv.ticker] || { div: 0, cap: 0 };
+    wDiv += meta.div * val;
+    wCap += meta.cap * val;
+    totalW += val;
+  });
+  const avgDiv = totalW > 0 ? wDiv / totalW : 0;
+  const avgCap = totalW > 0 ? wCap / totalW : 0;
+
+  const aporteEl = document.getElementById('proy-aporte');
+  const aumentoEl = document.getElementById('proy-aumento');
+  const retornoEl = document.getElementById('proy-retorno');
+  const divEl = document.getElementById('proy-div');
+
+  const aporteBase = parseFloat(aporteEl?.value) || 0;
+  const aumentoAnual = parseFloat(aumentoEl?.value) || 0;
+  const retornoAnual = parseFloat(retornoEl?.value) ?? avgCap;
+  const divAnual = parseFloat(divEl?.value) ?? avgDiv;
+  const totalRetorno = retornoAnual + divAnual; // gross annual %
+
+  const YEARS = [1, 5, 10, 20];
+
+  function proyectar(anos, conAporte) {
+    let valor = valorBase;
+    let totalAportes = 0;
+    let totalDividendos = 0;
+    let aporteMensual = conAporte ? aporteBase : 0;
+    const r = retornoAnual / 100;
+    const d = divAnual / 100;
+    const incr = aumentoAnual / 100;
+
+    for (let y = 0; y < anos; y++) {
+      if (y > 0 && conAporte) aporteMensual *= (1 + incr);
+      for (let m = 0; m < 12; m++) {
+        valor += aporteMensual;
+        totalAportes += aporteMensual;
+        const divMensual = valor * (d / 12);
+        valor += divMensual; // reinvest dividends
+        totalDividendos += divMensual;
+        valor *= (1 + r / 12);
+      }
+    }
+    return { valor, totalAportes, totalDividendos };
+  }
+
+  let html = `<table class="proy-table">
+    <thead><tr>
+      <th>Plazo</th>
+      <th>Sin aportes</th>
+      <th>Con aportes</th>
+      <th>Aportes acum.</th>
+      <th>Divid. reinv.</th>
+    </tr></thead><tbody>`;
+
+  YEARS.forEach(y => {
+    const sinAp = proyectar(y, false);
+    const conAp = proyectar(y, true);
+    html += `<tr>
+      <td>${y} año${y > 1 ? 's' : ''}</td>
+      <td>$${sinAp.valor.toFixed(0)}</td>
+      <td>$${conAp.valor.toFixed(0)}</td>
+      <td>$${conAp.totalAportes.toFixed(0)}</td>
+      <td>$${conAp.totalDividendos.toFixed(0)}</td>
+    </tr>`;
+  });
+
+  html += `</tbody></table>
+  <div class="proy-note">
+    Base actual: <strong>$${valorBase.toFixed(2)} USD</strong> ·
+    Retorno capital: <strong>${retornoAnual.toFixed(1)}%/año</strong> ·
+    Dividendo: <strong>${divAnual.toFixed(1)}%/año</strong> (reinvertido) ·
+    Aporte: <strong>$${aporteBase}/mes</strong>${aumentoAnual > 0 ? ` (+${aumentoAnual}%/año)` : ''}<br>
+    <em>Proyecciones aproximadas. No garantizan rendimientos futuros.</em>
+  </div>`;
+
+  el.innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════
