@@ -1,0 +1,100 @@
+name: Sync eToro Portfolio
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'   # cada 2 horas
+  workflow_dispatch:          # también se puede lanzar manualmente
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch eToro portfolio
+        env:
+          ETORO_TOKEN: ${{ secrets.ETORO_TOKEN }}
+        run: |
+          python3 - <<'EOF'
+          import requests, json, os, sys
+
+          token = os.environ.get('ETORO_TOKEN', '')
+          if not token:
+              print("ERROR: ETORO_TOKEN secret not set")
+              json.dump({"error": "token_not_configured"}, open('portfolio_etoro.json','w'))
+              sys.exit(0)
+
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accounttype': 'real',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Accept-Language': 'es-CO,es;q=0.9,en;q=0.8',
+              'Referer': 'https://www.etoro.com/portfolio',
+              'Origin': 'https://www.etoro.com',
+              'X-Requested-With': 'XMLHttpRequest',
+          }
+
+          endpoints = [
+              ('portfolio',   'https://www.etoro.com/sapi/trade-real/portfolio'),
+              ('positions',   'https://www.etoro.com/sapi/trade-real/positions'),
+              ('logindata',   'https://www.etoro.com/api/logininfo/v1.1/logindata'),
+              ('instruments', 'https://www.etoro.com/sapi/trade-real/instruments'),
+          ]
+
+          results = {}
+          session = requests.Session()
+
+          for name, url in endpoints:
+              try:
+                  r = session.get(url, headers=headers, timeout=20)
+                  print(f"{name}: HTTP {r.status_code}")
+                  if r.status_code == 200:
+                      results[name] = r.json()
+                  else:
+                      results[name] = {'http_error': r.status_code, 'body': r.text[:300]}
+              except Exception as e:
+                  results[name] = {'exception': str(e)}
+                  print(f"{name}: EXCEPTION {e}")
+
+          # Normalizar posiciones al formato que usa el frontend
+          positions = []
+          raw_positions = (
+              results.get('portfolio', {}).get('AggregatedPositions') or
+              results.get('portfolio', {}).get('positions') or
+              results.get('positions', {}).get('Positions') or
+              results.get('positions', {}).get('positions') or
+              []
+          )
+          for p in raw_positions:
+              ticker = (p.get('Ticker') or p.get('ticker') or p.get('Symbol') or '').upper()
+              positions.append({
+                  'Ticker':  ticker,
+                  'Amount':  p.get('Amount') or p.get('units') or p.get('Invested') or 0,
+                  'Value':   p.get('Value') or p.get('CurrentValue') or p.get('NetValue') or 0,
+                  'NetProfit': p.get('NetProfit') or p.get('profit') or p.get('ProfitLoss') or 0,
+                  'Name':    p.get('Name') or p.get('InstrumentName') or ticker,
+              })
+
+          output = {
+              'updated': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+              'positions': positions,
+              'raw': results,
+          }
+
+          with open('portfolio_etoro.json', 'w') as f:
+              json.dump(output, f, ensure_ascii=False, indent=2)
+
+          print(f"\nGuardado: {len(positions)} posiciones en portfolio_etoro.json")
+          EOF
+
+      - name: Commit portfolio data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add portfolio_etoro.json
+          git diff --staged --quiet && echo "Sin cambios" || git commit -m "chore: update eToro portfolio data [skip ci]"
+          git diff HEAD~1 --quiet 2>/dev/null || git push

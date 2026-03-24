@@ -1329,19 +1329,18 @@
 <div class="overlay" id="etoro-modal">
   <div class="modal">
     <div class="modal-handle"></div>
-    <div class="modal-title">⚙ Conectar eToro API</div>
-    <p style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.6;">
-      El token se guarda <strong>solo en tu dispositivo</strong> (localStorage), nunca en el código fuente.<br>
-      Si sincroniza correctamente, tu portafolio se actualizará con datos reales de eToro.
+    <div class="modal-title">⚙ Sincronización eToro</div>
+    <div id="etoro-sync-status" style="font-size:13px;margin-bottom:16px;padding:12px;background:var(--surface2);border-radius:10px;line-height:1.7;"></div>
+    <p style="font-size:11px;color:var(--text2);margin-bottom:8px;line-height:1.7;">
+      Para activar la sincronización automática con eToro:<br>
+      1. Ve a <strong>github.com/froylanjimenez/finanzas</strong><br>
+      2. Settings → Secrets and variables → Actions<br>
+      3. New repository secret → nombre: <strong>ETORO_TOKEN</strong><br>
+      4. Valor: tu token de eToro → guardar<br>
+      5. Ve a Actions → "Sync eToro Portfolio" → Run workflow
     </p>
-    <div class="form-group">
-      <label class="form-label">Token API eToro</label>
-      <input class="form-input" id="etoro-token-input" type="password" placeholder="Pega tu token aquí" autocomplete="off">
-    </div>
-    <div id="etoro-test-result" style="font-size:12px;margin-bottom:12px;min-height:18px;"></div>
-    <button class="btn-primary" onclick="saveEtoroToken()">Guardar y probar conexión</button>
-    <button class="btn-secondary" onclick="clearEtoroToken()" style="color:var(--danger);">Eliminar token</button>
-    <button class="btn-secondary" onclick="closeModal('etoro-modal')">Cancelar</button>
+    <button class="btn-primary" onclick="checkEtoroFile()">Verificar sincronización</button>
+    <button class="btn-secondary" onclick="closeModal('etoro-modal')">Cerrar</button>
   </div>
 </div>
 
@@ -1403,7 +1402,6 @@ if (!stored) localStorage.setItem('ff_inversiones', JSON.stringify(inversiones))
 let invPrecios = {}; // {ticker: {price, changePct, name}}
 let usdCop = null;
 let proyecVisible = false;
-let etoroToken = localStorage.getItem('ff_etoro_token') || null;
 
 let currentType   = 'expense';
 let selectedCat   = 'comida';
@@ -2681,93 +2679,51 @@ async function fetchUsdCop() {
 }
 
 // ── eToro API ────────────────────────────────────────────────────────────────
-function showEtoroModal() {
-  const input = document.getElementById('etoro-token-input');
-  if (input) input.value = etoroToken || '';
-  document.getElementById('etoro-test-result').textContent = '';
+async function showEtoroModal() {
   document.getElementById('etoro-modal').classList.add('open');
+  await checkEtoroFile();
 }
 
-function saveEtoroToken() {
-  const val = document.getElementById('etoro-token-input').value.trim();
-  if (!val) { showToast('Pega tu token primero'); return; }
-  etoroToken = val;
-  localStorage.setItem('ff_etoro_token', val);
-  testEtoroConnection();
-}
-
-function clearEtoroToken() {
-  etoroToken = null;
-  localStorage.removeItem('ff_etoro_token');
-  document.getElementById('etoro-token-input').value = '';
-  document.getElementById('etoro-test-result').textContent = '';
-  const btn = document.getElementById('etoro-cfg-btn');
-  if (btn) { btn.textContent = '⚙'; btn.style.color = ''; }
-  showToast('Token eliminado');
-  closeModal('etoro-modal');
+async function checkEtoroFile() {
+  const el = document.getElementById('etoro-sync-status');
+  if (el) { el.textContent = 'Verificando...'; el.style.color = 'var(--text2)'; }
+  try {
+    const resp = await fetch('portfolio_etoro.json?t=' + Date.now(), { signal: AbortSignal.timeout(6000) });
+    if (!resp.ok) throw new Error('not found');
+    const data = await resp.json();
+    if (data.error === 'token_not_configured') {
+      el.innerHTML = '⚠️ <strong>Token no configurado.</strong> Sigue los pasos abajo para activar la sync.';
+      el.style.color = 'var(--warning)';
+    } else if (data.positions?.length > 0) {
+      const when = data.updated ? new Date(data.updated).toLocaleString('es-CO') : '—';
+      el.innerHTML = `✅ <strong>Sincronizado</strong> · ${data.positions.length} posiciones<br>Última actualización: ${when}`;
+      el.style.color = 'var(--success)';
+      const btn = document.getElementById('etoro-cfg-btn');
+      if (btn) { btn.textContent = '✓'; btn.style.color = 'var(--success)'; }
+    } else {
+      el.innerHTML = '⚠️ Archivo encontrado pero sin posiciones. Revisa el token en GitHub Secrets.';
+      el.style.color = 'var(--warning)';
+    }
+  } catch {
+    el.innerHTML = '🔴 <strong>Sin sincronización.</strong> El archivo portfolio_etoro.json aún no existe.<br>Configura el secret ETORO_TOKEN y ejecuta el workflow.';
+    el.style.color = 'var(--danger)';
+  }
 }
 
 async function fetchEtoroPortfolio() {
-  if (!etoroToken) return null;
-
-  // Known eToro API endpoints to try (via CORS proxy since eToro blocks direct browser calls)
-  const authHeader = `Bearer ${etoroToken}`;
-  const proxies = [
-    (u) => `https://corsproxy.io/?${encodeURIComponent(u)}`,
-    (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`
-  ];
-  const endpoints = [
-    'https://www.etoro.com/sapi/trade-real/portfolio',
-    'https://api.etoro.com/API/User/V1/portfolio',
-    'https://www.etoro.com/api/logininfo/v1.1/logindata',
-  ];
-
-  for (const proxyFn of proxies) {
-    for (const endpoint of endpoints) {
-      try {
-        const url = proxyFn(endpoint);
-        const resp = await fetch(url, {
-          headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-          signal: AbortSignal.timeout(10000)
-        });
-        let data;
-        if (url.includes('allorigins')) {
-          const wrapper = await resp.json();
-          data = JSON.parse(wrapper.contents);
-        } else {
-          data = await resp.json();
-        }
-        // Try to extract positions from various response shapes
-        const positions =
-          data?.AggregatedPositions ||
-          data?.positions ||
-          data?.ClientPortfolio?.AggregatedPositions ||
-          data?.portfolio?.positions ||
-          null;
-        if (positions && positions.length > 0) return { positions, raw: data };
-      } catch { /* try next */ }
+  // Read the JSON file generated by GitHub Actions (no CORS issues)
+  try {
+    const resp = await fetch('portfolio_etoro.json?t=' + Date.now(), { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (data.error) return null;
+    if (data.positions && data.positions.length > 0) {
+      return { positions: data.positions, updated: data.updated };
     }
-  }
+  } catch { /* file not yet generated */ }
   return null;
 }
 
-async function testEtoroConnection() {
-  const res = document.getElementById('etoro-test-result');
-  if (res) { res.textContent = 'Probando conexión...'; res.style.color = 'var(--text2)'; }
-  const result = await fetchEtoroPortfolio();
-  const btn = document.getElementById('etoro-cfg-btn');
-  if (result) {
-    const count = result.positions.length;
-    if (res) { res.textContent = `✓ Conectado — ${count} posiciones encontradas`; res.style.color = 'var(--success)'; }
-    if (btn) { btn.textContent = '✓'; btn.style.color = 'var(--success)'; }
-    showToast(`eToro conectado — ${count} posiciones`);
-    closeModal('etoro-modal');
-    actualizarPrecios();
-  } else {
-    if (res) { res.textContent = '✗ No se pudo conectar. eToro puede bloquear llamadas externas. Se usarán precios de Yahoo Finance.'; res.style.color = 'var(--danger)'; }
-    if (btn) { btn.textContent = '⚙'; btn.style.color = 'var(--warning)'; }
-  }
-}
 
 function applyEtoroData(positions) {
   // Map eToro positions to our inversiones array, updating P&L and units
@@ -2879,7 +2835,9 @@ async function actualizarPrecios() {
 
   const fetched = Object.keys(invPrecios).length;
   const total = uniqueTickers.filter(t => t !== 'CRYPTO').length;
-  const etoroBadge = source === 'etoro' ? ' · 📊 eToro sync' : '';
+  const etoroBadge = etoroData?.updated
+    ? ` · 📊 eToro ${new Date(etoroData.updated).toLocaleString('es-CO', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}`
+    : '';
   if (status) {
     if (fetched === 0 && total > 0) {
       status.textContent = 'No se pudo conectar. Verifica tu conexión.';
@@ -3066,11 +3024,15 @@ function renderProyecciones() {
 //  INIT
 // ═══════════════════════════════════════════════
 renderAll();
-// Show eToro connected indicator if token already saved
-if (etoroToken) {
-  const btn = document.getElementById('etoro-cfg-btn');
-  if (btn) { btn.textContent = '✓'; btn.style.color = 'var(--success)'; }
-}
+// Check if eToro data file exists on load
+fetch('portfolio_etoro.json').then(r => {
+  if (r.ok) return r.json();
+}).then(d => {
+  if (d?.positions?.length > 0) {
+    const btn = document.getElementById('etoro-cfg-btn');
+    if (btn) { btn.textContent = '✓'; btn.style.color = 'var(--success)'; }
+  }
+}).catch(() => {});
 </script>
 <div class="toast" id="toast"></div>
 </body>
