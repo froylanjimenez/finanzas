@@ -20,16 +20,19 @@ jobs:
       - name: Fetch eToro portfolio
         env:
           ETORO_TOKEN: ${{ secrets.ETORO_TOKEN }}
+          ETORO_PUBLIC_KEY: ${{ secrets.ETORO_PUBLIC_KEY }}
         run: |
           python3 - <<'EOF'
           import requests, json, os, sys, base64
 
-          raw_token = os.environ.get('ETORO_TOKEN', '').strip()
+          raw_token  = os.environ.get('ETORO_TOKEN', '').strip()
+          public_key = os.environ.get('ETORO_PUBLIC_KEY', '').strip()
           if not raw_token:
               print("ERROR: ETORO_TOKEN secret not set")
               with open('portfolio_etoro.json', 'w') as f:
                   json.dump({"error": "token_not_configured"}, f)
               sys.exit(0)
+          print(f"Public key present: {bool(public_key)}")
 
           # Decode the token to extract fields (it's base64-encoded JSON)
           try:
@@ -53,12 +56,13 @@ jobs:
               'Origin': 'https://www.etoro.com',
           })
 
-          # Try multiple auth strategies
+          # Try multiple auth strategies (with and without public key header)
+          pk_headers = {'X-App-Key': public_key} if public_key else {}
           auth_strategies = [
-              {'Authorization': f'Bearer {raw_token}'},
-              {'Authorization': raw_token},
-              {'Authorization': f'Bearer {api_key}'},
-              {'apiKey': api_key, 'clientId': client_id},
+              {**pk_headers, 'Authorization': f'Bearer {raw_token}'},
+              {**pk_headers, 'Authorization': raw_token},
+              {**pk_headers, 'Authorization': f'Bearer {api_key}'},
+              {'Authorization': f'Bearer {raw_token}'},   # sin public key como fallback
           ]
 
           # Step 1: get login data to find GCID (needed for portfolio URLs)
