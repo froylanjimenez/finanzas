@@ -3,7 +3,7 @@ name: Sync eToro Portfolio
 on:
   schedule:
     - cron: '0 */2 * * *'   # cada 2 horas
-  workflow_dispatch:          # también se puede lanzar manualmente
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,76 +22,118 @@ jobs:
           ETORO_TOKEN: ${{ secrets.ETORO_TOKEN }}
         run: |
           python3 - <<'EOF'
-          import requests, json, os, sys
+          import requests, json, os, sys, base64
 
-          token = os.environ.get('ETORO_TOKEN', '')
-          if not token:
+          raw_token = os.environ.get('ETORO_TOKEN', '').strip()
+          if not raw_token:
               print("ERROR: ETORO_TOKEN secret not set")
-              json.dump({"error": "token_not_configured"}, open('portfolio_etoro.json','w'))
+              with open('portfolio_etoro.json', 'w') as f:
+                  json.dump({"error": "token_not_configured"}, f)
               sys.exit(0)
 
-          headers = {
-              'Authorization': f'Bearer {token}',
-              'Accounttype': 'real',
+          # Decode the token to extract fields (it's base64-encoded JSON)
+          try:
+              padding = '=' * (4 - len(raw_token.replace('_','=')) % 4)
+              decoded = base64.urlsafe_b64decode(raw_token.replace('__', '') + padding)
+              token_data = json.loads(decoded)
+              client_id = token_data.get('ci', '')
+              api_key   = token_data.get('fk', '')
+              print(f"Token decoded: ci={client_id[:8]}... eami={token_data.get('eami')}")
+          except Exception as e:
+              print(f"Token decode failed: {e} — using raw token as-is")
+              client_id = ''
+              api_key   = raw_token
+
+          session = requests.Session()
+          session.headers.update({
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
               'Accept': 'application/json, text/plain, */*',
-              'Accept-Language': 'es-CO,es;q=0.9,en;q=0.8',
+              'Accept-Language': 'es,en;q=0.9',
               'Referer': 'https://www.etoro.com/portfolio',
               'Origin': 'https://www.etoro.com',
-              'X-Requested-With': 'XMLHttpRequest',
-          }
+          })
 
-          endpoints = [
-              ('portfolio',   'https://www.etoro.com/sapi/trade-real/portfolio'),
-              ('positions',   'https://www.etoro.com/sapi/trade-real/positions'),
-              ('logindata',   'https://www.etoro.com/api/logininfo/v1.1/logindata'),
-              ('instruments', 'https://www.etoro.com/sapi/trade-real/instruments'),
+          # Try multiple auth strategies
+          auth_strategies = [
+              {'Authorization': f'Bearer {raw_token}'},
+              {'Authorization': raw_token},
+              {'Authorization': f'Bearer {api_key}'},
+              {'apiKey': api_key, 'clientId': client_id},
           ]
 
-          results = {}
-          session = requests.Session()
-
-          for name, url in endpoints:
+          # Step 1: get login data to find GCID (needed for portfolio URLs)
+          gcid = None
+          for auth in auth_strategies:
               try:
-                  r = session.get(url, headers=headers, timeout=20)
-                  print(f"{name}: HTTP {r.status_code}")
+                  r = session.get(
+                      'https://www.etoro.com/api/logininfo/v1.1/logindata',
+                      headers=auth, timeout=15
+                  )
+                  print(f"logindata [{list(auth.keys())[0]}]: HTTP {r.status_code}")
                   if r.status_code == 200:
-                      results[name] = r.json()
-                  else:
-                      results[name] = {'http_error': r.status_code, 'body': r.text[:300]}
+                      d = r.json()
+                      gcid = d.get('RealCid') or d.get('Gcid') or d.get('realCid')
+                      if gcid:
+                          print(f"Got GCID: {gcid}")
+                          session.headers.update(auth)
+                          break
               except Exception as e:
-                  results[name] = {'exception': str(e)}
-                  print(f"{name}: EXCEPTION {e}")
+                  print(f"logindata error: {e}")
 
-          # Normalizar posiciones al formato que usa el frontend
+          # Step 2: fetch portfolio using GCID or generic endpoints
+          portfolio_endpoints = []
+          if gcid:
+              portfolio_endpoints += [
+                  f'https://www.etoro.com/sapi/trade-real/users/{gcid}/portfolio',
+                  f'https://www.etoro.com/sapi/trade-real/users/{gcid}/positions',
+              ]
+          portfolio_endpoints += [
+              'https://www.etoro.com/sapi/trade-real/portfolio',
+              'https://www.etoro.com/sapi/portfolios/v1/portfolio',
+          ]
+
           positions = []
-          raw_positions = (
-              results.get('portfolio', {}).get('AggregatedPositions') or
-              results.get('portfolio', {}).get('positions') or
-              results.get('positions', {}).get('Positions') or
-              results.get('positions', {}).get('positions') or
-              []
-          )
-          for p in raw_positions:
-              ticker = (p.get('Ticker') or p.get('ticker') or p.get('Symbol') or '').upper()
-              positions.append({
-                  'Ticker':  ticker,
-                  'Amount':  p.get('Amount') or p.get('units') or p.get('Invested') or 0,
-                  'Value':   p.get('Value') or p.get('CurrentValue') or p.get('NetValue') or 0,
-                  'NetProfit': p.get('NetProfit') or p.get('profit') or p.get('ProfitLoss') or 0,
-                  'Name':    p.get('Name') or p.get('InstrumentName') or ticker,
-              })
+          for url in portfolio_endpoints:
+              try:
+                  r = session.get(url, timeout=15)
+                  print(f"portfolio {url.split('/')[-1]}: HTTP {r.status_code}")
+                  if r.status_code == 200:
+                      d = r.json()
+                      raw_pos = (
+                          d.get('AggregatedPositions') or
+                          d.get('positions') or
+                          d.get('Positions') or
+                          d.get('ClientPortfolio', {}).get('AggregatedPositions') or
+                          []
+                      )
+                      if raw_pos:
+                          print(f"Found {len(raw_pos)} positions")
+                          for p in raw_pos:
+                              ticker = (p.get('Ticker') or p.get('ticker') or
+                                        p.get('Symbol') or p.get('InstrumentName') or '').upper()
+                              positions.append({
+                                  'Ticker':    ticker,
+                                  'Amount':    p.get('Amount') or p.get('units') or 0,
+                                  'Value':     p.get('Value') or p.get('CurrentValue') or p.get('NetValue') or 0,
+                                  'NetProfit': p.get('NetProfit') or p.get('profit') or p.get('ProfitLoss') or 0,
+                                  'Name':      p.get('Name') or p.get('InstrumentName') or ticker,
+                              })
+                          break
+              except Exception as e:
+                  print(f"portfolio error: {e}")
 
+          import datetime
           output = {
-              'updated': __import__('datetime').datetime.utcnow().isoformat() + 'Z',
+              'updated': datetime.datetime.utcnow().isoformat() + 'Z',
               'positions': positions,
-              'raw': results,
+              'gcid': gcid,
+              'auth_ok': gcid is not None or len(positions) > 0,
           }
 
           with open('portfolio_etoro.json', 'w') as f:
               json.dump(output, f, ensure_ascii=False, indent=2)
 
-          print(f"\nGuardado: {len(positions)} posiciones en portfolio_etoro.json")
+          print(f"\nGuardado: {len(positions)} posiciones (auth_ok={output['auth_ok']})")
           EOF
 
       - name: Commit portfolio data
@@ -99,5 +141,4 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add portfolio_etoro.json
-          git diff --staged --quiet && echo "Sin cambios" || git commit -m "chore: update eToro portfolio data [skip ci]"
-          git diff HEAD~1 --quiet 2>/dev/null || git push
+          git diff --staged --quiet && echo "Sin cambios" || (git commit -m "chore: update eToro portfolio data [skip ci]" && git push)
