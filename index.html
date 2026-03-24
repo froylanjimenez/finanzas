@@ -598,6 +598,70 @@
   .corte-alert-text strong { color:var(--danger); }
   .corte-alert.hidden { display:none; }
 
+  /* ── Simulador de Abono ── */
+  .sim-card {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px; margin-bottom:16px;
+  }
+  .sim-title { font-family:'Syne',sans-serif; font-size:13px; font-weight:700; color:var(--text2); letter-spacing:.5px; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
+  .sim-mode-toggle { display:flex; gap:8px; margin-bottom:16px; }
+  .sim-mode-btn {
+    flex:1; padding:10px 6px; border-radius:var(--radius-sm); border:1px solid var(--border);
+    background:var(--surface2); color:var(--text2); cursor:pointer; font-size:12px;
+    font-family:'DM Mono',monospace; text-align:center; transition:.2s;
+  }
+  .sim-mode-btn.active { background:rgba(106,247,201,0.12); border-color:var(--accent3); color:var(--accent3); }
+  .sim-result {
+    margin-top:14px; padding:14px; border-radius:var(--radius-sm);
+    background:rgba(106,247,201,0.06); border:1px solid rgba(106,247,201,0.15); display:none;
+  }
+  .sim-result.visible { display:block; animation:fadeUp .2s ease; }
+  .sim-result-row { display:flex; justify-content:space-between; padding:5px 0; font-size:13px; }
+  .sim-result-key { color:var(--text2); }
+  .sim-result-val { color:var(--accent3); font-weight:600; }
+  .sim-result-val.highlight { font-family:'Syne',sans-serif; font-size:16px; color:#fff; }
+  .sim-saving { font-size:11px; color:var(--accent3); margin-top:8px; padding-top:8px; border-top:1px solid rgba(106,247,201,0.1); line-height:1.6; }
+
+  /* ── Inversiones ── */
+  .inv-header-row { display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; }
+  .inv-portfolio-card {
+    background:linear-gradient(135deg,rgba(59,130,246,.12),rgba(56,189,248,.06));
+    border:1px solid rgba(59,130,246,.2); border-radius:var(--radius); padding:20px; margin-bottom:16px;
+  }
+  .inv-total-label { font-size:10px; color:var(--text2); letter-spacing:2px; text-transform:uppercase; margin-bottom:6px; }
+  .inv-total-usd { font-family:'Syne',sans-serif; font-size:34px; font-weight:800; color:#fff; line-height:1.1; }
+  .inv-total-cop { font-size:13px; color:var(--accent2); margin-top:4px; }
+  .inv-total-gl { font-size:13px; margin-top:8px; padding-top:10px; border-top:1px solid rgba(255,255,255,.07); }
+  .inv-refresh-btn {
+    font-size:11px; color:var(--accent); cursor:pointer; letter-spacing:1px; text-transform:uppercase;
+    background:none; border:1px solid rgba(59,130,246,.3); padding:5px 12px; border-radius:6px;
+    font-family:'DM Mono',monospace; transition:.2s;
+  }
+  .inv-refresh-btn:hover { background:rgba(59,130,246,.1); }
+  .inv-refresh-btn:disabled { opacity:.5; cursor:not-allowed; }
+  .inv-item {
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);
+    padding:16px; margin-bottom:8px; animation:fadeUp .25s ease both; transition:.15s;
+  }
+  .inv-item:hover { border-color:rgba(59,130,246,.3); }
+  .inv-item-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
+  .inv-ticker { font-family:'Syne',sans-serif; font-size:16px; font-weight:800; }
+  .inv-name { font-size:11px; color:var(--text2); margin-top:2px; }
+  .inv-price { text-align:right; }
+  .inv-price-val { font-family:'Syne',sans-serif; font-size:16px; font-weight:700; }
+  .inv-price-change { font-size:11px; margin-top:2px; }
+  .inv-item-bot { display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid var(--border); }
+  .inv-shares-info { font-size:12px; color:var(--text2); }
+  .inv-value { font-size:14px; font-weight:600; }
+  .inv-gl { font-size:11px; margin-top:2px; }
+  .inv-gl.pos { color:var(--accent3); }
+  .inv-gl.neg { color:var(--danger); }
+  .inv-del { font-size:12px; color:var(--text2); background:none; border:none; cursor:pointer; padding:4px 8px; border-radius:6px; transition:.2s; }
+  .inv-del:hover { color:var(--danger); background:rgba(247,106,106,.1); }
+  .inv-status { font-size:11px; color:var(--text2); text-align:center; padding:8px 0; }
+  .inv-status.loading { color:var(--accent2); }
+  .inv-status.error { color:var(--warning); }
+
   .toast {
     position: fixed;
     bottom: 90px;
@@ -819,6 +883,36 @@
 
       <!-- Resumen créditos -->
       <div id="creditos-resumen"></div>
+
+      <!-- ── Simulador de Abono a Capital ── -->
+      <div style="margin-top:24px;">
+        <div class="gf-section-title">🧮 Simulador de Abono a Capital</div>
+        <div class="sim-card">
+          <div class="sim-title">¿Qué deseas reducir con el abono?</div>
+          <div class="sim-mode-toggle">
+            <button class="sim-mode-btn active" id="sim-mode-tiempo" onclick="setSimMode('tiempo')">⏱ Reducir tiempo</button>
+            <button class="sim-mode-btn" id="sim-mode-cuota" onclick="setSimMode('cuota')">💸 Reducir cuota</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Saldo actual del crédito ($)</label>
+            <input class="form-input" id="sim-saldo" type="text" placeholder="0" oninput="formatAmountInput(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Tasa de interés mensual (%)</label>
+            <input class="form-input" id="sim-tasa" type="number" placeholder="1.5" step="0.01" min="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Cuota mensual actual ($)</label>
+            <input class="form-input" id="sim-cuota" type="text" placeholder="0" oninput="formatAmountInput(this)">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Monto del abono a capital ($)</label>
+            <input class="form-input" id="sim-abono" type="text" placeholder="0" oninput="formatAmountInput(this)">
+          </div>
+          <button class="btn-primary" onclick="calcularAbono()">Calcular impacto del abono</button>
+          <div class="sim-result" id="sim-result"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -917,6 +1011,35 @@
     </div>
   </div>
 
+  <!-- ══════════════ INVERSIONES PAGE ══════════════ -->
+  <div id="page-inversiones" class="page">
+    <div class="page-inner">
+      <div class="inv-header-row">
+        <div>
+          <div class="page-title">Portafolio</div>
+          <div class="page-subtitle">Acciones en eToro — precios en tiempo real</div>
+        </div>
+        <button class="inv-refresh-btn" id="inv-refresh-btn" onclick="actualizarPrecios()">↻ Actualizar</button>
+      </div>
+
+      <!-- Resumen total -->
+      <div class="inv-portfolio-card" id="inv-portfolio-card">
+        <div class="inv-total-label">Valor total portafolio</div>
+        <div class="inv-total-usd" id="inv-total-usd">— USD</div>
+        <div class="inv-total-cop" id="inv-total-cop">— COP</div>
+        <div class="inv-total-gl" id="inv-total-gl"></div>
+      </div>
+
+      <!-- Lista de acciones -->
+      <div class="gf-section-title">
+        Mis acciones
+        <button class="gf-add-btn" onclick="showAddInversionModal()">+ Agregar</button>
+      </div>
+      <div id="inv-list"></div>
+      <div class="inv-status" id="inv-status"></div>
+    </div>
+  </div>
+
   <!-- ══════════════ BOTTOM NAV ══════════════ -->
   <nav class="bottom-nav">
     <button class="nav-btn active" id="nav-home" onclick="switchPage('home')">
@@ -943,6 +1066,12 @@
         <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
       </svg>
       <span class="nav-label">Créditos</span>
+    </button>
+    <button class="nav-btn" id="nav-inversiones" onclick="switchPage('inversiones')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>
+      </svg>
+      <span class="nav-label">Portafolio</span>
     </button>
     <button class="nav-btn" id="nav-stats" onclick="switchPage('stats')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1152,6 +1281,32 @@
   </div>
 </div>
 
+<!-- ══════════════ ADD INVERSION MODAL ══════════════ -->
+<div class="overlay" id="add-inversion-modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">📈 Agregar acción</div>
+    <div class="form-group">
+      <label class="form-label">Ticker (símbolo)</label>
+      <input class="form-input" id="inv-ticker-input" type="text" placeholder="Ej: AAPL, TSLA, AMZN" autocomplete="off" style="text-transform:uppercase;" oninput="this.value=this.value.toUpperCase()">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre (opcional)</label>
+      <input class="form-input" id="inv-nombre-input" type="text" placeholder="Ej: Apple Inc.">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Número de acciones</label>
+      <input class="form-input" id="inv-acciones-input" type="number" placeholder="0" step="0.0001" min="0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Precio promedio de compra (USD)</label>
+      <input class="form-input" id="inv-precio-input" type="number" placeholder="0.00" step="0.01" min="0">
+    </div>
+    <button class="btn-primary" onclick="saveInversion()">Guardar acción</button>
+    <button class="btn-secondary" onclick="closeModal('add-inversion-modal')">Cancelar</button>
+  </div>
+</div>
+
 <script>
 // ═══════════════════════════════════════════════
 //  DATA & STATE
@@ -1162,6 +1317,9 @@ let gastosFijos; try { gastosFijos = JSON.parse(localStorage.getItem('ff_gastos_
 let creditos; try { creditos = JSON.parse(localStorage.getItem('ff_creditos')) || []; } catch(e) { creditos = []; }
 let tcConfig; try { tcConfig = JSON.parse(localStorage.getItem('ff_tc_config')) || null; } catch(e) { tcConfig = null; }
 let tcPagos; try { tcPagos = JSON.parse(localStorage.getItem('ff_tc_pagos')) || {}; } catch(e) { tcPagos = {}; } // {YYYY-MM: {minPaid, recPaid}}
+let inversiones; try { inversiones = JSON.parse(localStorage.getItem('ff_inversiones')) || []; } catch(e) { inversiones = []; }
+let invPrecios = {}; // {ticker: {price, change, changePct, currency}}
+let usdCop = null;
 
 let currentType   = 'expense';
 let selectedCat   = 'comida';
@@ -1288,6 +1446,7 @@ function switchPage(page) {
   if (page === 'settings') renderSettings();
   if (page === 'fijos') renderGastosFijos();
   if (page === 'creditos') renderCreditos();
+  if (page === 'inversiones') { renderInversiones(usdCop); if (!Object.keys(invPrecios).length && inversiones.length) actualizarPrecios(); }
 }
 
 // ═══════════════════════════════════════════════
@@ -1992,7 +2151,7 @@ function renderTCSummary() {
   const rows   = document.getElementById('tc-summary-rows');
 
   const tcTxsAll = transactions.filter(t => t.isTc && t.type === 'expense');
-  if (tcTxsAll.length === 0) { card.style.display = 'none'; return; }
+  if (tcTxsAll.length === 0 || pagado) { card.style.display = 'none'; return; }
   card.style.display = 'block';
 
   const now = new Date();
@@ -2334,6 +2493,196 @@ function renderAll() {
   // Actualizar si la página activa lo requiere
   if (document.getElementById('page-fijos').classList.contains('active')) renderGastosFijos();
   if (document.getElementById('page-creditos').classList.contains('active')) renderCreditos();
+}
+
+// ═══════════════════════════════════════════════
+//  SIMULADOR DE ABONO A CAPITAL
+// ═══════════════════════════════════════════════
+let simMode = 'tiempo'; // 'tiempo' | 'cuota'
+
+function setSimMode(mode) {
+  simMode = mode;
+  document.getElementById('sim-mode-tiempo').classList.toggle('active', mode === 'tiempo');
+  document.getElementById('sim-mode-cuota').classList.toggle('active', mode === 'cuota');
+  document.getElementById('sim-result').classList.remove('visible');
+}
+
+function calcularAbono() {
+  const P = getRawAmount(document.getElementById('sim-saldo').value);
+  const r = parseFloat(document.getElementById('sim-tasa').value) / 100;
+  const C = getRawAmount(document.getElementById('sim-cuota').value);
+  const A = getRawAmount(document.getElementById('sim-abono').value);
+
+  if (!P || !r || !C || !A) { showToast('Completa todos los campos'); return; }
+  if (C <= P * r) { showToast('La cuota debe ser mayor al interés mensual'); return; }
+  if (A >= P) { showToast('El abono no puede superar el saldo'); return; }
+
+  // Plazo actual (meses): n = -ln(1 - P*r/C) / ln(1+r)
+  const nActual = Math.ceil(-Math.log(1 - P * r / C) / Math.log(1 + r));
+  const interesActual = C * nActual - P;
+
+  const P2 = P - A; // saldo tras el abono
+  const res = document.getElementById('sim-result');
+
+  let html = `<div class="sim-result-row"><span class="sim-result-key">Saldo antes del abono</span><span class="sim-result-val">${formatNum(P)}</span></div>
+    <div class="sim-result-row"><span class="sim-result-key">Saldo después del abono</span><span class="sim-result-val">${formatNum(P2)}</span></div>
+    <div class="sim-result-row"><span class="sim-result-key">Plazo actual</span><span class="sim-result-val">${nActual} meses</span></div>`;
+
+  if (simMode === 'tiempo') {
+    // Mismo cuota, calcular nuevo plazo
+    const nNuevo = Math.ceil(-Math.log(1 - P2 * r / C) / Math.log(1 + r));
+    const mesesAhorrados = nActual - nNuevo;
+    const interesNuevo = C * nNuevo - P2;
+    const interesAhorrado = interesActual - interesNuevo;
+    html += `<div class="sim-result-row"><span class="sim-result-key">Nuevo plazo</span><span class="sim-result-val highlight">${nNuevo} meses</span></div>
+      <div class="sim-result-row"><span class="sim-result-key">Meses ahorrados</span><span class="sim-result-val">⏱ ${mesesAhorrados} meses menos</span></div>
+      <div class="sim-saving">💰 Ahorro en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Interés total sin abono: ${formatNum(interesActual)} → con abono: ${formatNum(interesNuevo)}</div>`;
+  } else {
+    // Mismo plazo, calcular nueva cuota
+    const t = Math.pow(1 + r, nActual);
+    const cNueva = P2 * r * t / (t - 1);
+    const ahorroMensual = C - cNueva;
+    const interesNuevo = cNueva * nActual - P2;
+    const interesAhorrado = interesActual - interesNuevo;
+    html += `<div class="sim-result-row"><span class="sim-result-key">Nueva cuota mensual</span><span class="sim-result-val highlight">${formatNum(cNueva)}</span></div>
+      <div class="sim-result-row"><span class="sim-result-key">Reducción mensual</span><span class="sim-result-val">💸 ${formatNum(ahorroMensual)} menos/mes</span></div>
+      <div class="sim-saving">💰 Ahorro total en intereses: <strong>${formatNum(interesAhorrado)}</strong><br>Interés total sin abono: ${formatNum(interesActual)} → con abono: ${formatNum(interesNuevo)}</div>`;
+  }
+
+  res.innerHTML = html;
+  res.classList.add('visible');
+}
+
+// ═══════════════════════════════════════════════
+//  INVERSIONES (PORTAFOLIO)
+// ═══════════════════════════════════════════════
+function showAddInversionModal() {
+  ['inv-ticker-input','inv-nombre-input','inv-acciones-input','inv-precio-input'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('add-inversion-modal').classList.add('open');
+}
+
+function saveInversion() {
+  const ticker = document.getElementById('inv-ticker-input').value.trim().toUpperCase();
+  const nombre = document.getElementById('inv-nombre-input').value.trim();
+  const acciones = parseFloat(document.getElementById('inv-acciones-input').value) || 0;
+  const precioPromedio = parseFloat(document.getElementById('inv-precio-input').value) || 0;
+  if (!ticker || acciones <= 0 || precioPromedio <= 0) { showToast('Completa ticker, acciones y precio'); return; }
+  inversiones.push({ id: Date.now(), ticker, nombre: nombre || ticker, acciones, precioPromedio });
+  localStorage.setItem('ff_inversiones', JSON.stringify(inversiones));
+  closeModal('add-inversion-modal');
+  renderInversiones();
+  actualizarPrecios();
+}
+
+function deleteInversion(id) {
+  inversiones = inversiones.filter(i => i.id !== id);
+  delete invPrecios[inversiones.find ? '' : ''];
+  localStorage.setItem('ff_inversiones', JSON.stringify(inversiones));
+  renderInversiones();
+}
+
+async function fetchUsdCop() {
+  if (usdCop) return usdCop;
+  try {
+    const r = await fetch('https://open.er-api.com/v6/latest/USD');
+    const d = await r.json();
+    usdCop = d.rates?.COP || null;
+    return usdCop;
+  } catch { return null; }
+}
+
+async function actualizarPrecios() {
+  if (!inversiones.length) return;
+  const btn = document.getElementById('inv-refresh-btn');
+  const status = document.getElementById('inv-status');
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Actualizando...'; }
+  if (status) { status.textContent = 'Obteniendo precios...'; status.className = 'inv-status loading'; }
+
+  const tickers = [...new Set(inversiones.map(i => i.ticker))].join(',');
+  const rate = await fetchUsdCop();
+
+  try {
+    const url = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(tickers)}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketChange,shortName,currency`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const quotes = data?.quoteResponse?.result || [];
+    quotes.forEach(q => {
+      invPrecios[q.symbol] = {
+        price: q.regularMarketPrice,
+        change: q.regularMarketChange,
+        changePct: q.regularMarketChangePercent,
+        currency: q.currency || 'USD',
+        name: q.shortName || q.symbol
+      };
+    });
+    if (status) { status.textContent = `Actualizado: ${new Date().toLocaleTimeString('es-CO')}`; status.className = 'inv-status'; }
+  } catch {
+    if (status) { status.textContent = 'No se pudo conectar. Verifica tu conexión.'; status.className = 'inv-status error'; }
+  }
+
+  renderInversiones(rate);
+  if (btn) { btn.disabled = false; btn.textContent = '↻ Actualizar'; }
+}
+
+function renderInversiones(rate) {
+  const list = document.getElementById('inv-list');
+  if (!list) return;
+
+  if (!inversiones.length) {
+    list.innerHTML = `<div class="empty-state"><div class="emoji">📈</div><h3>Sin acciones</h3><p>Agrega tus acciones de eToro para hacer seguimiento</p></div>`;
+    document.getElementById('inv-portfolio-card').style.display = 'none';
+    return;
+  }
+
+  document.getElementById('inv-portfolio-card').style.display = 'block';
+  const cop = rate || usdCop;
+  let totalUSD = 0, totalInvertido = 0;
+
+  list.innerHTML = inversiones.map(inv => {
+    const p = invPrecios[inv.ticker];
+    const precio = p ? p.price : null;
+    const valorActual = precio !== null ? inv.acciones * precio : null;
+    const valorInvertido = inv.acciones * inv.precioPromedio;
+    const ganancia = valorActual !== null ? valorActual - valorInvertido : null;
+    const gPct = ganancia !== null ? (ganancia / valorInvertido) * 100 : null;
+    if (valorActual !== null) totalUSD += valorActual;
+    totalInvertido += valorInvertido;
+
+    const precioStr = precio !== null ? `$${precio.toFixed(2)}` : '—';
+    const changePct = p ? `${p.changePct >= 0 ? '+' : ''}${p.changePct.toFixed(2)}%` : '';
+    const changeColor = p ? (p.changePct >= 0 ? 'var(--accent3)' : 'var(--danger)') : 'var(--text2)';
+    const valorStr = valorActual !== null ? `$${valorActual.toFixed(2)}` : '—';
+    const glStr = ganancia !== null ? `${ganancia >= 0 ? '+' : ''}$${ganancia.toFixed(2)} (${gPct.toFixed(2)}%)` : '—';
+    const glClass = ganancia !== null ? (ganancia >= 0 ? 'pos' : 'neg') : '';
+
+    return `<div class="inv-item">
+      <div class="inv-item-top">
+        <div><div class="inv-ticker">${inv.ticker}</div><div class="inv-name">${p?.name || inv.nombre}</div></div>
+        <div class="inv-price">
+          <div class="inv-price-val">${precioStr}</div>
+          <div class="inv-price-change" style="color:${changeColor}">${changePct}</div>
+        </div>
+      </div>
+      <div class="inv-item-bot">
+        <div>
+          <div class="inv-shares-info">${inv.acciones} acc × $${inv.precioPromedio.toFixed(2)}</div>
+          <div class="inv-value">${valorStr} USD</div>
+          <div class="inv-gl ${glClass}">${glStr}</div>
+        </div>
+        <button class="inv-del" onclick="deleteInversion(${inv.id})">🗑</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Totales
+  const glTotal = totalUSD - totalInvertido;
+  const glPct = totalInvertido > 0 ? (glTotal / totalInvertido) * 100 : 0;
+  document.getElementById('inv-total-usd').textContent = `$${totalUSD.toFixed(2)} USD`;
+  document.getElementById('inv-total-cop').textContent = cop ? `≈ ${formatNum(totalUSD * cop).replace('$','')} COP (1 USD = ${Math.round(cop).toLocaleString('es-CO')} COP)` : '— COP (sin tasa de cambio)';
+  const glColor = glTotal >= 0 ? 'var(--accent3)' : 'var(--danger)';
+  document.getElementById('inv-total-gl').innerHTML = `<span style="color:${glColor};font-size:13px;">${glTotal >= 0 ? '▲' : '▼'} ${glTotal >= 0 ? '+' : ''}$${glTotal.toFixed(2)} USD (${glPct.toFixed(2)}%)</span> <span style="font-size:11px;color:var(--text2);">vs precio promedio</span>`;
 }
 
 // ═══════════════════════════════════════════════
