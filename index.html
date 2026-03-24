@@ -1055,18 +1055,22 @@
         <div class="sim-card" style="margin-bottom:12px;">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div class="form-group" style="margin-bottom:8px;">
-              <label class="form-label">Aporte mensual (USD)</label>
-              <input class="form-input" id="proy-aporte" type="number" placeholder="0" value="0" oninput="renderProyecciones()">
+              <label class="form-label">Ahorro mensual (USD)</label>
+              <input class="form-input" id="proy-aporte" type="number" placeholder="0" min="0" value="0" oninput="renderProyecciones()">
             </div>
             <div class="form-group" style="margin-bottom:8px;">
-              <label class="form-label">Aumento anual aporte (%)</label>
+              <label class="form-label">Abono semestral (USD)</label>
+              <input class="form-input" id="proy-semestral" type="number" placeholder="0" min="0" value="0" oninput="renderProyecciones()">
+            </div>
+            <div class="form-group" style="margin-bottom:8px;">
+              <label class="form-label">Aumento anual aportes (%)</label>
               <input class="form-input" id="proy-aumento" type="number" placeholder="0" value="0" oninput="renderProyecciones()">
             </div>
             <div class="form-group" style="margin-bottom:8px;">
               <label class="form-label">Retorno anual capital (%)</label>
               <input class="form-input" id="proy-retorno" type="number" placeholder="10" value="10" oninput="renderProyecciones()">
             </div>
-            <div class="form-group" style="margin-bottom:0;">
+            <div class="form-group" style="margin-bottom:0;grid-column:1/-1;">
               <label class="form-label">Dividendo anual est. (%)</label>
               <input class="form-input" id="proy-div" type="number" placeholder="2.5" value="2.5" oninput="renderProyecciones()">
             </div>
@@ -2653,34 +2657,62 @@ async function fetchUsdCop() {
 }
 
 async function fetchTickerPrice(ticker) {
-  if (ticker === 'CRYPTO') return null; // eToro smart portfolio, no public ticker
-  // Try direct Yahoo Finance chart API first, then CORS proxy fallback
-  const endpoints = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`,
-    `https://api.allorigins.win/get?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=1d&range=1d')}`
-  ];
-  for (const url of endpoints) {
+  if (ticker === 'CRYPTO') return null;
+
+  // Strategy 1 & 2: Yahoo Finance v8/chart direct (query1 + query2)
+  for (const host of ['query1', 'query2']) {
     try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
-      let data;
-      if (url.includes('allorigins')) {
-        const wrapper = await resp.json();
-        data = JSON.parse(wrapper.contents);
-      } else {
-        data = await resp.json();
-      }
+      const url = `https://${host}.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+      const resp = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const data = await resp.json();
       const meta = data?.chart?.result?.[0]?.meta;
-      if (meta && meta.regularMarketPrice) {
-        return {
-          price: meta.regularMarketPrice,
-          prevClose: meta.chartPreviousClose || meta.previousClose || meta.regularMarketPrice,
-          name: meta.longName || meta.shortName || ticker,
-          currency: meta.currency || 'USD'
-        };
+      if (meta?.regularMarketPrice) {
+        return { price: meta.regularMarketPrice, prevClose: meta.chartPreviousClose || meta.regularMarketPrice, name: meta.longName || meta.shortName || ticker, currency: meta.currency || 'USD' };
       }
     } catch { /* try next */ }
   }
+
+  // Strategy 3: Yahoo Finance via allorigins CORS proxy
+  try {
+    const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&range=1d`;
+    const resp = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`, { signal: AbortSignal.timeout(10000) });
+    const wrapper = await resp.json();
+    const data = JSON.parse(wrapper.contents);
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (meta?.regularMarketPrice) {
+      return { price: meta.regularMarketPrice, prevClose: meta.chartPreviousClose || meta.regularMarketPrice, name: meta.longName || meta.shortName || ticker, currency: meta.currency || 'USD' };
+    }
+  } catch { /* try next */ }
+
+  // Strategy 4: Yahoo Finance v7/quote via corsproxy.io
+  try {
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(ticker)}`;
+    const resp = await fetch(`https://corsproxy.io/?${encodeURIComponent(yUrl)}`, { signal: AbortSignal.timeout(10000) });
+    const data = await resp.json();
+    const q = data?.quoteResponse?.result?.[0];
+    if (q?.regularMarketPrice) {
+      return { price: q.regularMarketPrice, prevClose: q.regularMarketPreviousClose || q.regularMarketPrice, name: q.shortName || ticker, currency: q.currency || 'USD' };
+    }
+  } catch { /* try next */ }
+
+  // Strategy 5: Stooq CSV (good fallback for US + European tickers)
+  // Yahoo uses .L for London; stooq uses .UK
+  try {
+    const stooqTicker = ticker.replace(/\.L$/i, '.UK').toLowerCase();
+    const csvUrl = `https://stooq.com/q/l/?s=${encodeURIComponent(stooqTicker)}&f=sd2t2ohlcv&h&e=csv`;
+    const resp = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(csvUrl)}`, { signal: AbortSignal.timeout(10000) });
+    const wrapper = await resp.json();
+    const lines = wrapper.contents.trim().split('\n');
+    if (lines.length >= 2) {
+      const cols = lines[1].split(',');
+      const close = parseFloat(cols[5]);
+      const open = parseFloat(cols[2]);
+      if (!isNaN(close) && close > 0) {
+        return { price: close, prevClose: open || close, name: ticker, currency: ticker.endsWith('.L') ? 'GBP' : 'USD' };
+      }
+    }
+  } catch { /* all failed */ }
+
   return null;
 }
 
@@ -2810,35 +2842,35 @@ function renderProyecciones() {
   const avgDiv = totalW > 0 ? wDiv / totalW : 0;
   const avgCap = totalW > 0 ? wCap / totalW : 0;
 
-  const aporteEl = document.getElementById('proy-aporte');
-  const aumentoEl = document.getElementById('proy-aumento');
-  const retornoEl = document.getElementById('proy-retorno');
-  const divEl = document.getElementById('proy-div');
-
-  const aporteBase = parseFloat(aporteEl?.value) || 0;
-  const aumentoAnual = parseFloat(aumentoEl?.value) || 0;
-  const retornoAnual = parseFloat(retornoEl?.value) ?? avgCap;
-  const divAnual = parseFloat(divEl?.value) ?? avgDiv;
-  const totalRetorno = retornoAnual + divAnual; // gross annual %
+  const aporteBase    = parseFloat(document.getElementById('proy-aporte')?.value)    || 0;
+  const semestralBase = parseFloat(document.getElementById('proy-semestral')?.value) || 0;
+  const aumentoAnual  = parseFloat(document.getElementById('proy-aumento')?.value)   || 0;
+  const retornoAnual  = parseFloat(document.getElementById('proy-retorno')?.value)   ?? avgCap;
+  const divAnual      = parseFloat(document.getElementById('proy-div')?.value)       ?? avgDiv;
 
   const YEARS = [1, 5, 10, 20];
 
   function proyectar(anos, conAporte) {
     let valor = valorBase;
-    let totalAportes = 0;
-    let totalDividendos = 0;
-    let aporteMensual = conAporte ? aporteBase : 0;
+    let totalAportes = 0, totalDividendos = 0;
+    let mensual = conAporte ? aporteBase : 0;
+    let semestral = conAporte ? semestralBase : 0;
     const r = retornoAnual / 100;
     const d = divAnual / 100;
     const incr = aumentoAnual / 100;
 
     for (let y = 0; y < anos; y++) {
-      if (y > 0 && conAporte) aporteMensual *= (1 + incr);
+      if (y > 0 && conAporte) { mensual *= (1 + incr); semestral *= (1 + incr); }
       for (let m = 0; m < 12; m++) {
-        valor += aporteMensual;
-        totalAportes += aporteMensual;
+        valor += mensual;
+        totalAportes += mensual;
+        // Semi-annual injection at months 5 (Jun) and 11 (Dec)
+        if (conAporte && (m === 5 || m === 11)) {
+          valor += semestral;
+          totalAportes += semestral;
+        }
         const divMensual = valor * (d / 12);
-        valor += divMensual; // reinvest dividends
+        valor += divMensual;
         totalDividendos += divMensual;
         valor *= (1 + r / 12);
       }
@@ -2846,12 +2878,13 @@ function renderProyecciones() {
     return { valor, totalAportes, totalDividendos };
   }
 
+  const aporteAnual = aporteBase * 12 + semestralBase * 2;
   let html = `<table class="proy-table">
     <thead><tr>
       <th>Plazo</th>
       <th>Sin aportes</th>
       <th>Con aportes</th>
-      <th>Aportes acum.</th>
+      <th>Invertido</th>
       <th>Divid. reinv.</th>
     </tr></thead><tbody>`;
 
@@ -2867,12 +2900,12 @@ function renderProyecciones() {
     </tr>`;
   });
 
+  const semLabel = semestralBase > 0 ? ` + $${semestralBase}/sem` : '';
   html += `</tbody></table>
   <div class="proy-note">
     Base actual: <strong>$${valorBase.toFixed(2)} USD</strong> ·
-    Retorno capital: <strong>${retornoAnual.toFixed(1)}%/año</strong> ·
-    Dividendo: <strong>${divAnual.toFixed(1)}%/año</strong> (reinvertido) ·
-    Aporte: <strong>$${aporteBase}/mes</strong>${aumentoAnual > 0 ? ` (+${aumentoAnual}%/año)` : ''}<br>
+    Retorno: <strong>${retornoAnual.toFixed(1)}%</strong> capital + <strong>${divAnual.toFixed(1)}%</strong> dividendos/año (reinvertido) ·
+    Aportes: <strong>$${aporteBase}/mes${semLabel}</strong> = $${aporteAnual.toFixed(0)}/año${aumentoAnual > 0 ? ` (+${aumentoAnual}%/año)` : ''}<br>
     <em>Proyecciones aproximadas. No garantizan rendimientos futuros.</em>
   </div>`;
 
