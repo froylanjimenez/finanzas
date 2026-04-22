@@ -163,6 +163,7 @@
   <button data-tab="inicio" class="active">Inicio</button>
   <button data-tab="gastos">Gastos</button>
   <button data-tab="sueldo">Sueldo</button>
+  <button data-tab="proyeccion">Proyección</button>
   <button data-tab="credito">Crédito</button>
   <button data-tab="recomendaciones">Recomendaciones</button>
   <button data-tab="ajustes">Ajustes</button>
@@ -279,6 +280,57 @@
       <button class="btn" id="btnAddExtra">Agregar ingreso</button>
     </div>
     <div id="listaExtras" style="margin-top:12px;"></div>
+  </div>
+</section>
+
+<section id="proyeccion">
+  <h2>Proyección futura</h2>
+
+  <div class="card">
+    <h3>Parámetros</h3>
+    <div class="row">
+      <div>
+        <label>Meses a proyectar</label>
+        <input type="number" id="pMeses" min="1" max="60" value="12">
+      </div>
+      <div>
+        <label>Gasto mensual estimado (COP)</label>
+        <input type="text" inputmode="numeric" id="pGasto" data-miles placeholder="Auto">
+        <p class="hint" id="pGastoAuto"></p>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnProyectar">Proyectar</button>
+      <button class="btn secondary" id="btnResetGasto">Usar estimación automática</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Primas y bonos programados</h3>
+    <p class="hint">Ingresos puntuales ya anticipados (prima de junio, prima de diciembre, bonos…). Se suman al ingreso del mes correspondiente.</p>
+    <div class="row">
+      <div>
+        <label>Mes</label>
+        <input type="month" id="prMes">
+      </div>
+      <div>
+        <label>Descripción</label>
+        <input type="text" id="prDescripcion" placeholder="Prima legal, bono...">
+      </div>
+      <div>
+        <label>Monto (COP)</label>
+        <input type="text" inputmode="numeric" id="prMonto" data-miles placeholder="0">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnAddPrima">Agregar</button>
+    </div>
+    <div id="listaPrimas" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Proyección mensual</h3>
+    <div id="tablaProyeccion"></div>
   </div>
 </section>
 
@@ -430,6 +482,7 @@ function baseState() {
     gastos: [],
     categorias: defaultCategorias.slice(),
     credito: null,
+    primas: [],
   };
 }
 function loadState() {
@@ -900,6 +953,127 @@ function renderRecomendaciones() {
   document.getElementById("sugerencias").innerHTML = sugs.map((s) => `<div class="alert ${s.cls}">${s.html}</div>`).join("");
 }
 
+function gastoPromedioHistorico() {
+  const porMes = {};
+  state.gastos.forEach((g) => {
+    const m = g.fecha.slice(0, 7);
+    porMes[m] = (porMes[m] || 0) + g.monto;
+  });
+  const mesActual = monthISO();
+  const mesesCompletos = Object.keys(porMes).filter((m) => m < mesActual).sort();
+  if (mesesCompletos.length) {
+    const ultimos = mesesCompletos.slice(-3);
+    return Math.round(ultimos.reduce((a, m) => a + porMes[m], 0) / ultimos.length);
+  }
+  // fallback: proyecta el gasto del mes actual a 30 días
+  const hoy = new Date();
+  const dia = hoy.getDate();
+  const gastadoMes = porMes[mesActual] || 0;
+  if (dia > 0 && gastadoMes > 0) return Math.round((gastadoMes / dia) * 30);
+  return 0;
+}
+
+function siguienteMes(mesYYYYMM) {
+  const [y, m] = mesYYYYMM.split("-").map(Number);
+  // m es 1-12; new Date(y, m, 1) devuelve el primer día del mes siguiente
+  const d = new Date(y, m, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function renderPrimas() {
+  const cont = document.getElementById("listaPrimas");
+  if (!state.primas.length) {
+    cont.innerHTML = `<div class="empty">Sin primas ni bonos programados.</div>`;
+    return;
+  }
+  const sorted = state.primas.slice().sort((a, b) => a.mes.localeCompare(b.mes));
+  cont.innerHTML = `<table><thead><tr><th>Mes</th><th>Descripción</th><th class="num">Monto</th><th></th></tr></thead><tbody>${
+    sorted.map((p) => `<tr>
+      <td>${p.mes}</td>
+      <td>${p.descripcion || ""}</td>
+      <td class="num">${money(p.monto)}</td>
+      <td><button class="btn small danger" data-delprima="${p.id}">×</button></td>
+    </tr>`).join("")
+  }</tbody></table>`;
+  cont.querySelectorAll("[data-delprima]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.primas = state.primas.filter((p) => p.id !== b.dataset.delprima);
+      saveState(); renderAll();
+    });
+  });
+}
+
+function renderProyeccion() {
+  const nMeses = Math.max(1, Math.min(60, Number(document.getElementById("pMeses").value) || 12));
+  const gastoAuto = gastoPromedioHistorico();
+  const pGastoAutoEl = document.getElementById("pGastoAuto");
+  pGastoAutoEl.textContent = gastoAuto
+    ? `Estimación automática: ${money(gastoAuto)} (promedio de meses con historial).`
+    : `Sin historial suficiente: ingresa un estimado manual.`;
+
+  const gastoUsuario = parseMiles(document.getElementById("pGasto").value);
+  const gastoEst = gastoUsuario || gastoAuto;
+  const sueldoBase = state.sueldo.monto || 0;
+
+  const cont = document.getElementById("tablaProyeccion");
+  if (!sueldoBase) {
+    cont.innerHTML = `<div class="alert info">Configura tu sueldo en la pestaña Sueldo para proyectar.</div>`;
+    return;
+  }
+
+  let mes = siguienteMes(monthISO());
+  const filas = [];
+  let acumulado = 0;
+  for (let i = 0; i < nMeses; i++) {
+    const primasMes = state.primas.filter((p) => p.mes === mes).reduce((a, b) => a + b.monto, 0);
+    const detallePrimas = state.primas.filter((p) => p.mes === mes).map((p) => p.descripcion || "").filter(Boolean).join(", ");
+    const ingreso = sueldoBase + primasMes;
+    const saldoLibre = ingreso - gastoEst;
+    acumulado += saldoLibre;
+    filas.push({ mes, ingreso, primasMes, detallePrimas, gasto: gastoEst, saldoLibre, acumulado });
+    mes = siguienteMes(mes);
+  }
+
+  const totalLibre = filas.reduce((a, f) => a + f.saldoLibre, 0);
+  const totalPrimas = filas.reduce((a, f) => a + f.primasMes, 0);
+
+  cont.innerHTML = `
+    <div class="grid" style="margin-bottom:12px;">
+      <div class="stat ${totalLibre >= 0 ? "positive" : "negative"}">
+        <div class="label">Saldo libre acumulado en ${nMeses} meses</div>
+        <div class="value">${money(totalLibre)}</div>
+      </div>
+      <div class="stat">
+        <div class="label">Total primas/bonos en el periodo</div>
+        <div class="value">${money(totalPrimas)}</div>
+      </div>
+    </div>
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr>
+        <th>Mes</th>
+        <th class="num">Sueldo</th>
+        <th class="num">Primas</th>
+        <th class="num">Ingreso</th>
+        <th class="num">Gasto est.</th>
+        <th class="num">Saldo libre</th>
+        <th class="num">Acumulado</th>
+      </tr></thead>
+      <tbody>${
+        filas.map((f) => `<tr>
+          <td>${f.mes}${f.detallePrimas ? `<div class="hint">${f.detallePrimas}</div>` : ""}</td>
+          <td class="num">${money(sueldoBase)}</td>
+          <td class="num">${f.primasMes ? money(f.primasMes) : "—"}</td>
+          <td class="num">${money(f.ingreso)}</td>
+          <td class="num">${money(f.gasto)}</td>
+          <td class="num" style="color:${f.saldoLibre >= 0 ? "var(--success)" : "var(--danger)"}">${money(f.saldoLibre)}</td>
+          <td class="num" style="color:${f.acumulado >= 0 ? "var(--success)" : "var(--danger)"}">${money(f.acumulado)}</td>
+        </tr>`).join("")
+      }</tbody>
+    </table>
+    </div>`;
+}
+
 function renderCategorias() {
   const cont = document.getElementById("listaCategorias");
   const chipCls = (tipo) => tipo === "necesidad" ? "nec" : tipo === "ahorro" ? "ahorro" : "gusto";
@@ -966,6 +1140,23 @@ document.getElementById("filtroMes").addEventListener("change", renderGastos);
 document.getElementById("filtroCategoria").addEventListener("change", renderGastos);
 document.getElementById("filtroAgrupar").addEventListener("change", renderGastos);
 
+document.getElementById("btnAddPrima").addEventListener("click", () => {
+  const mes = document.getElementById("prMes").value;
+  const descripcion = document.getElementById("prDescripcion").value.trim();
+  const monto = parseMiles(document.getElementById("prMonto").value);
+  if (!mes || !monto) { alert("Ingresa mes y monto."); return; }
+  state.primas.push({ id: uid(), mes, descripcion, monto });
+  document.getElementById("prDescripcion").value = "";
+  document.getElementById("prMonto").value = "";
+  saveState(); renderAll();
+});
+document.getElementById("btnProyectar").addEventListener("click", renderProyeccion);
+document.getElementById("btnResetGasto").addEventListener("click", () => {
+  document.getElementById("pGasto").value = "";
+  renderProyeccion();
+});
+document.getElementById("pMeses").addEventListener("change", renderProyeccion);
+
 document.getElementById("btnAddCat").addEventListener("click", () => {
   const nombre = document.getElementById("catNombre").value.trim();
   const tipo = document.getElementById("catTipo").value;
@@ -1010,6 +1201,8 @@ function renderAll() {
   renderInicio();
   renderGastos();
   renderSueldo();
+  renderPrimas();
+  renderProyeccion();
   renderCreditoForm();
   renderRecomendaciones();
   renderCategorias();
@@ -1018,6 +1211,7 @@ function renderAll() {
 document.getElementById("gFecha").value = todayISO();
 document.getElementById("eFecha").value = todayISO();
 document.getElementById("filtroMes").value = monthISO();
+document.getElementById("prMes").value = siguienteMes(monthISO());
 
 document.getElementById("aFreq").addEventListener("change", () => {
   const freq = document.getElementById("aFreq").value;
