@@ -253,11 +253,15 @@
         <label>Día de pago</label>
         <input type="number" id="sDiaPago" min="1" max="31" value="30">
       </div>
+      <div>
+        <label>Aumento anual (%)</label>
+        <input type="number" id="sAumento" min="0" max="100" step="0.1" placeholder="0">
+      </div>
     </div>
     <div class="actions">
       <button class="btn" id="btnGuardarSueldo">Guardar sueldo</button>
     </div>
-    <p class="hint">Se usa como base para calcular tu saldo disponible y las recomendaciones.</p>
+    <p class="hint">El aumento se aplica en enero de cada año y se compone año tras año en la proyección.</p>
   </div>
 
   <div class="card">
@@ -326,6 +330,42 @@
       <button class="btn" id="btnAddPrima">Agregar</button>
     </div>
     <div id="listaPrimas" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>Compromisos y gastos recurrentes</h3>
+    <p class="hint">Gastos que se suman a la proyección mes a mes. <b>Fijo</b>: sin fecha fin. <b>Temporal</b>: entre los meses de inicio y fin. Si tu "gasto mensual estimado" ya los incluye, no los agregues aquí.</p>
+    <div class="row">
+      <div>
+        <label>Descripción</label>
+        <input type="text" id="coDesc" placeholder="Curso, nueva cuota, suscripción...">
+      </div>
+      <div>
+        <label>Monto mensual (COP)</label>
+        <input type="text" inputmode="numeric" id="coMonto" data-miles placeholder="0">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Tipo</label>
+        <select id="coTipo">
+          <option value="fijo">Fijo (sin fin)</option>
+          <option value="temporal">Temporal</option>
+        </select>
+      </div>
+      <div>
+        <label>Desde</label>
+        <input type="month" id="coDesde">
+      </div>
+      <div>
+        <label>Hasta</label>
+        <input type="month" id="coHasta" disabled>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnAddCompromiso">Agregar compromiso</button>
+    </div>
+    <div id="listaCompromisos" style="margin-top:12px;"></div>
   </div>
 
   <div class="card">
@@ -477,12 +517,13 @@ const defaultCategorias = [
 
 function baseState() {
   return {
-    sueldo: { monto: 0, diaPago: 30 },
+    sueldo: { monto: 0, diaPago: 30, aumentoAnual: 0 },
     extras: [],
     gastos: [],
     categorias: defaultCategorias.slice(),
     credito: null,
     primas: [],
+    compromisos: [],
   };
 }
 function loadState() {
@@ -693,6 +734,7 @@ function renderGastos() {
 function renderSueldo() {
   setMiles(document.getElementById("sMonto"), state.sueldo.monto);
   document.getElementById("sDiaPago").value = state.sueldo.diaPago || 30;
+  document.getElementById("sAumento").value = state.sueldo.aumentoAnual || "";
 
   const mes = monthISO();
   const extrasMes = state.extras.filter((e) => e.fecha.startsWith(mes));
@@ -1003,6 +1045,52 @@ function renderPrimas() {
   });
 }
 
+function sueldoParaMes(mes, startMes, base, aumentoPct) {
+  if (!aumentoPct) return base;
+  const [sy] = startMes.split("-").map(Number);
+  const [y] = mes.split("-").map(Number);
+  // Cuenta cuántos eneros (incluidos) han ocurrido entre startMes y mes
+  let eneros = 0;
+  for (let yi = sy; yi <= y; yi++) {
+    const jan = `${yi}-01`;
+    if (jan >= startMes && jan <= mes) eneros++;
+  }
+  return base * Math.pow(1 + aumentoPct / 100, eneros);
+}
+
+function compromisosActivosEn(mes) {
+  return state.compromisos.filter((c) => {
+    if (c.desde && c.desde > mes) return false;
+    if (c.tipo === "temporal" && c.hasta && c.hasta < mes) return false;
+    return true;
+  });
+}
+
+function renderCompromisos() {
+  const cont = document.getElementById("listaCompromisos");
+  if (!state.compromisos.length) {
+    cont.innerHTML = `<div class="empty">Sin compromisos registrados.</div>`;
+    return;
+  }
+  const sorted = state.compromisos.slice().sort((a, b) => (a.desde || "").localeCompare(b.desde || ""));
+  cont.innerHTML = `<table><thead><tr><th>Descripción</th><th>Tipo</th><th>Desde</th><th>Hasta</th><th class="num">Monto/mes</th><th></th></tr></thead><tbody>${
+    sorted.map((c) => `<tr>
+      <td>${c.descripcion || "—"}</td>
+      <td><span class="chip ${c.tipo === "fijo" ? "nec" : "gusto"}">${c.tipo}</span></td>
+      <td>${c.desde || "—"}</td>
+      <td>${c.tipo === "temporal" ? (c.hasta || "—") : "∞"}</td>
+      <td class="num">${money(c.monto)}</td>
+      <td><button class="btn small danger" data-delco="${c.id}">×</button></td>
+    </tr>`).join("")
+  }</tbody></table>`;
+  cont.querySelectorAll("[data-delco]").forEach((b) => {
+    b.addEventListener("click", () => {
+      state.compromisos = state.compromisos.filter((c) => c.id !== b.dataset.delco);
+      saveState(); renderAll();
+    });
+  });
+}
+
 function renderProyeccion() {
   const nMeses = Math.max(1, Math.min(60, Number(document.getElementById("pMeses").value) || 12));
   const gastoAuto = gastoPromedioHistorico();
@@ -1012,8 +1100,9 @@ function renderProyeccion() {
     : `Sin historial suficiente: ingresa un estimado manual.`;
 
   const gastoUsuario = parseMiles(document.getElementById("pGasto").value);
-  const gastoEst = gastoUsuario || gastoAuto;
+  const gastoBase = gastoUsuario || gastoAuto;
   const sueldoBase = state.sueldo.monto || 0;
+  const aumento = state.sueldo.aumentoAnual || 0;
 
   const cont = document.getElementById("tablaProyeccion");
   if (!sueldoBase) {
@@ -1021,21 +1110,29 @@ function renderProyeccion() {
     return;
   }
 
-  let mes = siguienteMes(monthISO());
+  const startMes = siguienteMes(monthISO());
+  let mes = startMes;
   const filas = [];
   let acumulado = 0;
   for (let i = 0; i < nMeses; i++) {
+    const sueldoMes = sueldoParaMes(mes, startMes, sueldoBase, aumento);
     const primasMes = state.primas.filter((p) => p.mes === mes).reduce((a, b) => a + b.monto, 0);
-    const detallePrimas = state.primas.filter((p) => p.mes === mes).map((p) => p.descripcion || "").filter(Boolean).join(", ");
-    const ingreso = sueldoBase + primasMes;
-    const saldoLibre = ingreso - gastoEst;
+    const detallePrimas = state.primas.filter((p) => p.mes === mes).map((p) => p.descripcion || "prima").join(", ");
+    const activos = compromisosActivosEn(mes);
+    const compromisosMes = activos.reduce((a, c) => a + c.monto, 0);
+    const detalleCompromisos = activos.map((c) => c.descripcion || "compromiso").join(", ");
+    const ingreso = sueldoMes + primasMes;
+    const gastoTotal = gastoBase + compromisosMes;
+    const saldoLibre = ingreso - gastoTotal;
     acumulado += saldoLibre;
-    filas.push({ mes, ingreso, primasMes, detallePrimas, gasto: gastoEst, saldoLibre, acumulado });
+    filas.push({ mes, sueldoMes, primasMes, detallePrimas, compromisosMes, detalleCompromisos, gastoBase, gastoTotal, ingreso, saldoLibre, acumulado });
     mes = siguienteMes(mes);
   }
 
   const totalLibre = filas.reduce((a, f) => a + f.saldoLibre, 0);
   const totalPrimas = filas.reduce((a, f) => a + f.primasMes, 0);
+  const totalCompromisos = filas.reduce((a, f) => a + f.compromisosMes, 0);
+  const sueldoFinal = filas[filas.length - 1].sueldoMes;
 
   cont.innerHTML = `
     <div class="grid" style="margin-bottom:12px;">
@@ -1044,9 +1141,14 @@ function renderProyeccion() {
         <div class="value">${money(totalLibre)}</div>
       </div>
       <div class="stat">
-        <div class="label">Total primas/bonos en el periodo</div>
+        <div class="label">Total primas/bonos del periodo</div>
         <div class="value">${money(totalPrimas)}</div>
       </div>
+      <div class="stat">
+        <div class="label">Total compromisos del periodo</div>
+        <div class="value">${money(totalCompromisos)}</div>
+      </div>
+      ${aumento ? `<div class="stat"><div class="label">Sueldo al final del periodo</div><div class="value">${money(sueldoFinal)}</div></div>` : ""}
     </div>
     <div style="overflow-x:auto;">
     <table>
@@ -1055,23 +1157,26 @@ function renderProyeccion() {
         <th class="num">Sueldo</th>
         <th class="num">Primas</th>
         <th class="num">Ingreso</th>
-        <th class="num">Gasto est.</th>
+        <th class="num">Gasto base</th>
+        <th class="num">Compromisos</th>
         <th class="num">Saldo libre</th>
         <th class="num">Acumulado</th>
       </tr></thead>
       <tbody>${
         filas.map((f) => `<tr>
-          <td>${f.mes}${f.detallePrimas ? `<div class="hint">${f.detallePrimas}</div>` : ""}</td>
-          <td class="num">${money(sueldoBase)}</td>
-          <td class="num">${f.primasMes ? money(f.primasMes) : "—"}</td>
+          <td>${f.mes}</td>
+          <td class="num">${money(f.sueldoMes)}</td>
+          <td class="num" title="${f.detallePrimas}">${f.primasMes ? money(f.primasMes) : "—"}</td>
           <td class="num">${money(f.ingreso)}</td>
-          <td class="num">${money(f.gasto)}</td>
+          <td class="num">${money(f.gastoBase)}</td>
+          <td class="num" title="${f.detalleCompromisos}">${f.compromisosMes ? money(f.compromisosMes) : "—"}</td>
           <td class="num" style="color:${f.saldoLibre >= 0 ? "var(--success)" : "var(--danger)"}">${money(f.saldoLibre)}</td>
           <td class="num" style="color:${f.acumulado >= 0 ? "var(--success)" : "var(--danger)"}">${money(f.acumulado)}</td>
         </tr>`).join("")
       }</tbody>
     </table>
-    </div>`;
+    </div>
+    <p class="hint" style="margin-top:10px;">Pasa el cursor sobre "Primas" o "Compromisos" para ver el detalle del mes.</p>`;
 }
 
 function renderCategorias() {
@@ -1110,6 +1215,7 @@ document.getElementById("btnAddGasto").addEventListener("click", () => {
 document.getElementById("btnGuardarSueldo").addEventListener("click", () => {
   state.sueldo.monto = parseMiles(document.getElementById("sMonto").value);
   state.sueldo.diaPago = Number(document.getElementById("sDiaPago").value) || 30;
+  state.sueldo.aumentoAnual = Number(document.getElementById("sAumento").value) || 0;
   saveState(); renderAll();
   alert("Sueldo guardado.");
 });
@@ -1139,6 +1245,25 @@ document.getElementById("btnSimular").addEventListener("click", simular);
 document.getElementById("filtroMes").addEventListener("change", renderGastos);
 document.getElementById("filtroCategoria").addEventListener("change", renderGastos);
 document.getElementById("filtroAgrupar").addEventListener("change", renderGastos);
+
+document.getElementById("coTipo").addEventListener("change", () => {
+  document.getElementById("coHasta").disabled = document.getElementById("coTipo").value !== "temporal";
+});
+document.getElementById("btnAddCompromiso").addEventListener("click", () => {
+  const descripcion = document.getElementById("coDesc").value.trim();
+  const monto = parseMiles(document.getElementById("coMonto").value);
+  const tipo = document.getElementById("coTipo").value;
+  const desde = document.getElementById("coDesde").value;
+  const hasta = document.getElementById("coHasta").value;
+  if (!monto || !desde) { alert("Ingresa monto y mes de inicio."); return; }
+  if (tipo === "temporal" && !hasta) { alert("Ingresa mes de fin para compromiso temporal."); return; }
+  if (tipo === "temporal" && hasta < desde) { alert("El mes de fin no puede ser anterior al de inicio."); return; }
+  state.compromisos.push({ id: uid(), descripcion, monto, tipo, desde, hasta: tipo === "temporal" ? hasta : null });
+  document.getElementById("coDesc").value = "";
+  document.getElementById("coMonto").value = "";
+  document.getElementById("coHasta").value = "";
+  saveState(); renderAll();
+});
 
 document.getElementById("btnAddPrima").addEventListener("click", () => {
   const mes = document.getElementById("prMes").value;
@@ -1202,6 +1327,7 @@ function renderAll() {
   renderGastos();
   renderSueldo();
   renderPrimas();
+  renderCompromisos();
   renderProyeccion();
   renderCreditoForm();
   renderRecomendaciones();
@@ -1212,6 +1338,7 @@ document.getElementById("gFecha").value = todayISO();
 document.getElementById("eFecha").value = todayISO();
 document.getElementById("filtroMes").value = monthISO();
 document.getElementById("prMes").value = siguienteMes(monthISO());
+document.getElementById("coDesde").value = siguienteMes(monthISO());
 
 document.getElementById("aFreq").addEventListener("change", () => {
   const freq = document.getElementById("aFreq").value;
