@@ -201,7 +201,7 @@
       </div>
       <div>
         <label>Monto (COP)</label>
-        <input type="number" id="gMonto" min="0" step="1" placeholder="0">
+        <input type="text" inputmode="numeric" id="gMonto" data-miles placeholder="0">
       </div>
     </div>
     <div class="row">
@@ -246,7 +246,7 @@
     <div class="row">
       <div>
         <label>Monto mensual (COP)</label>
-        <input type="number" id="sMonto" min="0" step="1" placeholder="0">
+        <input type="text" inputmode="numeric" id="sMonto" data-miles placeholder="0">
       </div>
       <div>
         <label>Día de pago</label>
@@ -272,7 +272,7 @@
       </div>
       <div>
         <label>Monto (COP)</label>
-        <input type="number" id="eMonto" min="0" step="1">
+        <input type="text" inputmode="numeric" id="eMonto" data-miles placeholder="0">
       </div>
     </div>
     <div class="actions">
@@ -291,7 +291,7 @@
     <div class="row">
       <div>
         <label>Monto prestado (COP)</label>
-        <input type="number" id="cMonto" min="0" step="1" placeholder="0">
+        <input type="text" inputmode="numeric" id="cMonto" data-miles placeholder="0">
       </div>
       <div>
         <label>Tasa efectiva anual (%)</label>
@@ -318,10 +318,17 @@
     <div class="row">
       <div>
         <label>Monto del abono (COP)</label>
-        <input type="number" id="aMonto" min="0" step="1" placeholder="0">
+        <input type="text" inputmode="numeric" id="aMonto" data-miles placeholder="0">
       </div>
       <div>
-        <label>Aplicar en el mes #</label>
+        <label>Frecuencia</label>
+        <select id="aFreq">
+          <option value="unico">Único</option>
+          <option value="periodico">Periódico (cada mes)</option>
+        </select>
+      </div>
+      <div>
+        <label id="aMesLabel">Aplicar en el mes #</label>
         <input type="number" id="aMes" min="1" step="1" value="1">
       </div>
       <div>
@@ -439,6 +446,28 @@ const fmt = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP",
 const fmtPct = (v) => (v * 100).toFixed(1) + "%";
 const money = (v) => fmt.format(Math.round(v || 0));
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+// Miles helpers: formato "1.500.000"
+function formatMiles(v) {
+  const digits = String(v ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+}
+function parseMiles(v) {
+  const digits = String(v ?? "").replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+}
+function setMiles(el, value) { el.value = value ? formatMiles(value) : ""; }
+function attachMilesInputs() {
+  document.querySelectorAll("input[data-miles]").forEach((el) => {
+    el.addEventListener("input", () => {
+      const caretFromEnd = el.value.length - (el.selectionStart || 0);
+      el.value = formatMiles(el.value);
+      const newPos = Math.max(0, el.value.length - caretFromEnd);
+      try { el.setSelectionRange(newPos, newPos); } catch {}
+    });
+  });
+}
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const monthISO = (d = new Date()) => d.toISOString().slice(0, 7);
 const catById = (id) => state.categorias.find((c) => c.id === id) || { nombre: "—", tipo: "gusto" };
@@ -609,7 +638,7 @@ function renderGastos() {
 }
 
 function renderSueldo() {
-  document.getElementById("sMonto").value = state.sueldo.monto || "";
+  setMiles(document.getElementById("sMonto"), state.sueldo.monto);
   document.getElementById("sDiaPago").value = state.sueldo.diaPago || 30;
 
   const mes = monthISO();
@@ -642,7 +671,7 @@ function cuotaFrancesa(P, rMensual, n) {
 function tasaMensualDesdeEA(ea) { return Math.pow(1 + ea, 1 / 12) - 1; }
 
 function tablaAmortizacion(P, rMensual, n, abono) {
-  // abono: { mes, monto, modo: "plazo"|"cuota" } | null
+  // abono: { mes, monto, modo: "plazo"|"cuota", periodico: bool } | null
   let saldo = P;
   let cuota = cuotaFrancesa(P, rMensual, n);
   const rows = [];
@@ -650,11 +679,14 @@ function tablaAmortizacion(P, rMensual, n, abono) {
   let plazoRestante = n;
   while (saldo > 0.5 && mes < 1200) {
     let abonoAplicado = 0;
-    if (abono && abono.mes === mes && abono.monto > 0) {
-      abonoAplicado = Math.min(abono.monto, saldo);
-      saldo -= abonoAplicado;
-      if (abono.modo === "cuota" && saldo > 0 && plazoRestante > 0) {
-        cuota = cuotaFrancesa(saldo, rMensual, plazoRestante);
+    if (abono && abono.monto > 0) {
+      const aplica = abono.periodico ? mes >= abono.mes : mes === abono.mes;
+      if (aplica) {
+        abonoAplicado = Math.min(abono.monto, saldo);
+        saldo -= abonoAplicado;
+        if (abono.modo === "cuota" && saldo > 0 && plazoRestante > 0) {
+          cuota = cuotaFrancesa(saldo, rMensual, plazoRestante);
+        }
       }
     }
     const interes = saldo * rMensual;
@@ -674,7 +706,7 @@ function sumaPagos(rows) { return rows.reduce((a, r) => a + r.pago + r.abono, 0)
 
 function renderCreditoForm() {
   if (!state.credito) return;
-  document.getElementById("cMonto").value = state.credito.monto || "";
+  setMiles(document.getElementById("cMonto"), state.credito.monto);
   document.getElementById("cTasa").value = state.credito.tasaAnual || "";
   document.getElementById("cPlazo").value = state.credito.plazo || "";
 }
@@ -693,7 +725,7 @@ function renderTablaAmort(rows) {
 }
 
 function calcularYMostrar() {
-  const P = Number(document.getElementById("cMonto").value);
+  const P = parseMiles(document.getElementById("cMonto").value);
   const taEA = Number(document.getElementById("cTasa").value) / 100;
   const n = Number(document.getElementById("cPlazo").value);
   if (!P || !n || isNaN(taEA)) { alert("Completa monto, tasa y plazo."); return; }
@@ -721,13 +753,14 @@ function calcularYMostrar() {
 function simular() {
   if (!window._lastCredito) { alert("Primero calcula el crédito base."); return; }
   const { P, rM, n } = window._lastCredito;
-  const aMonto = Number(document.getElementById("aMonto").value);
+  const aMonto = parseMiles(document.getElementById("aMonto").value);
   const aMes = Number(document.getElementById("aMes").value);
   const aModo = document.getElementById("aModo").value;
+  const periodico = document.getElementById("aFreq").value === "periodico";
   if (!aMonto || !aMes) { alert("Ingresa monto y mes del abono."); return; }
 
   const base = tablaAmortizacion(P, rM, n, null);
-  const sim = tablaAmortizacion(P, rM, n, { mes: aMes, monto: aMonto, modo: aModo });
+  const sim = tablaAmortizacion(P, rM, n, { mes: aMes, monto: aMonto, modo: aModo, periodico });
   const baseInt = sumaIntereses(base);
   const simInt = sumaIntereses(sim);
   const ahorroInt = baseInt - simInt;
@@ -736,15 +769,20 @@ function simular() {
   const mesesAhorro = mesesBase - mesesSim;
   const cuotaBase = cuotaFrancesa(P, rM, n);
 
-  // cuota nueva cuando es modo "cuota": la del mes siguiente al abono
+  // cuota nueva en modo "cuota": la del mes siguiente al primer abono
   let cuotaNueva = cuotaBase;
   if (aModo === "cuota") {
-    const filaSig = sim[aMes]; // índice aMes = fila del mes aMes+1 (0-based)
-    if (filaSig) cuotaNueva = filaSig.pago;
-    else cuotaNueva = sim[sim.length - 1].pago;
+    const filaSig = sim[aMes]; // índice aMes = fila del mes (aMes+1)
+    cuotaNueva = filaSig ? filaSig.pago : sim[sim.length - 1].pago;
   }
 
+  const totalAbonado = sim.reduce((a, r) => a + r.abono, 0);
+  const descFreq = periodico
+    ? `Abono periódico de ${money(aMonto)}/mes desde el mes ${aMes} (total abonado: ${money(totalAbonado)}).`
+    : `Abono único de ${money(aMonto)} en el mes ${aMes}.`;
+
   document.getElementById("simResultado").innerHTML = `
+    <p class="hint">${descFreq}</p>
     <div class="grid">
       <div class="stat"><div class="label">Cuota original</div><div class="value">${money(cuotaBase)}</div></div>
       <div class="stat ${aModo === "cuota" ? "positive" : ""}"><div class="label">Cuota después del abono</div><div class="value">${money(cuotaNueva)}</div></div>
@@ -886,7 +924,7 @@ function renderCategorias() {
 document.getElementById("btnAddGasto").addEventListener("click", () => {
   const fecha = document.getElementById("gFecha").value || todayISO();
   const categoria = document.getElementById("gCategoria").value;
-  const monto = Number(document.getElementById("gMonto").value);
+  const monto = parseMiles(document.getElementById("gMonto").value);
   const descripcion = document.getElementById("gDescripcion").value.trim();
   if (!categoria || !monto || monto <= 0) { alert("Ingresa categoría y monto válido."); return; }
   state.gastos.push({ id: uid(), fecha, categoria, monto, descripcion });
@@ -896,7 +934,7 @@ document.getElementById("btnAddGasto").addEventListener("click", () => {
 });
 
 document.getElementById("btnGuardarSueldo").addEventListener("click", () => {
-  state.sueldo.monto = Number(document.getElementById("sMonto").value) || 0;
+  state.sueldo.monto = parseMiles(document.getElementById("sMonto").value);
   state.sueldo.diaPago = Number(document.getElementById("sDiaPago").value) || 30;
   saveState(); renderAll();
   alert("Sueldo guardado.");
@@ -904,7 +942,7 @@ document.getElementById("btnGuardarSueldo").addEventListener("click", () => {
 document.getElementById("btnAddExtra").addEventListener("click", () => {
   const fecha = document.getElementById("eFecha").value || todayISO();
   const descripcion = document.getElementById("eDescripcion").value.trim();
-  const monto = Number(document.getElementById("eMonto").value);
+  const monto = parseMiles(document.getElementById("eMonto").value);
   if (!monto || monto <= 0) { alert("Monto inválido."); return; }
   state.extras.push({ id: uid(), fecha, descripcion, monto });
   document.getElementById("eDescripcion").value = "";
@@ -914,7 +952,7 @@ document.getElementById("btnAddExtra").addEventListener("click", () => {
 
 document.getElementById("btnCalcular").addEventListener("click", calcularYMostrar);
 document.getElementById("btnGuardarCredito").addEventListener("click", () => {
-  const monto = Number(document.getElementById("cMonto").value);
+  const monto = parseMiles(document.getElementById("cMonto").value);
   const tasaAnual = Number(document.getElementById("cTasa").value);
   const plazo = Number(document.getElementById("cPlazo").value);
   if (!monto || !tasaAnual || !plazo) { alert("Completa los datos."); return; }
@@ -980,6 +1018,14 @@ function renderAll() {
 document.getElementById("gFecha").value = todayISO();
 document.getElementById("eFecha").value = todayISO();
 document.getElementById("filtroMes").value = monthISO();
+
+document.getElementById("aFreq").addEventListener("change", () => {
+  const freq = document.getElementById("aFreq").value;
+  document.getElementById("aMesLabel").textContent =
+    freq === "periodico" ? "Empezar en el mes #" : "Aplicar en el mes #";
+});
+
+attachMilesInputs();
 renderAll();
 </script>
 </body>
